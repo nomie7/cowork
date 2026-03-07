@@ -406,6 +406,20 @@
   background: white;
 }
 
+/* Native React components */
+.canvas-react-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.canvas-react-body {
+  padding: 16px;
+  background: white;
+  min-height: 200px;
+  color: #333;
+}
+
 /* PDF preview */
 .canvas-pdf-wrap {
   border: 1px solid var(--border);

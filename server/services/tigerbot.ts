@@ -32,7 +32,7 @@ async function llmCall(messages: ChatMessage[], options: { tools?: any[]; model?
     model: options.model || model,
     messages,
     temperature: 0.7,
-    max_tokens: 8192,
+    max_tokens: 81920,
   };
   if (options.tools && options.tools.length) {
     body.tools = options.tools;
@@ -172,7 +172,12 @@ export async function callTigerBotWithTools(
                 }
               }
               if (valueEnd > valueStart) {
-                const codeValue = rawArgs.slice(valueStart, valueEnd);
+                // Unescape JSON string escapes (\n, \t, \", \\)
+                const codeValue = rawArgs.slice(valueStart, valueEnd)
+                  .replace(/\\n/g, "\n")
+                  .replace(/\\t/g, "\t")
+                  .replace(/\\"/g, '"')
+                  .replace(/\\\\/g, "\\");
                 fnArgs = { code: codeValue };
                 const titleMatch = rawArgs.match(/"title"\s*:\s*"([^"]*)"/);
                 if (titleMatch) fnArgs.title = titleMatch[1];
@@ -452,7 +457,7 @@ export async function streamTigerBot(
         model,
         messages: allMessages,
         temperature: 0.7,
-        max_tokens: 4096,
+        max_tokens: 40960,
         stream: true,
       }),
     });

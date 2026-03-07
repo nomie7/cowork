@@ -58,7 +58,7 @@ const builtinTools = [
     type: "function" as const,
     function: {
       name: "run_react",
-      description: "Execute React/JSX code by generating an HTML file with inline React. The component will be rendered in the output panel. Returns the generated HTML file path.",
+      description: "Execute React/JSX code. The component is compiled with esbuild and rendered natively in the output panel using Recharts (already available — no CDN needed). Write a single default-exported React component. Recharts components (LineChart, BarChart, PieChart, ResponsiveContainer, etc.) are available as globals.",
       parameters: {
         type: "object",
         properties: {
@@ -314,107 +314,73 @@ async function runReactTool(args: { code: string; title?: string; dependencies?:
   const sandboxDir = settings.sandboxDir || path.resolve("sandbox");
   const outputDir = path.join(sandboxDir, "output_file");
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-  const filename = `react_${Date.now()}.html`;
-  const filePath = path.join(outputDir, filename);
 
-  // Map common library names to CDN URLs
-  const cdnMap: Record<string, string> = {
-    recharts: "https://unpkg.com/recharts@2.12.7/umd/Recharts.js",
-    "chart.js": "https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js",
-    lodash: "https://unpkg.com/lodash@4.17.21/lodash.min.js",
-    dayjs: "https://unpkg.com/dayjs@1.11.13/dayjs.min.js",
-    axios: "https://unpkg.com/axios@1.7.7/dist/axios.min.js",
-    "tailwindcss": "https://cdn.tailwindcss.com",
-  };
-
-  const extraScripts = (args.dependencies || [])
-    .map((dep) => {
-      const url = cdnMap[dep.toLowerCase()] || dep;
-      return `<script src="${url}"></script>`;
-    })
-    .join("\n    ");
-
-  // Clean up AI-generated code: strip import/export statements that break UMD context
   let code = args.code || "";
 
-  // Remove import statements (React/ReactDOM/libs are loaded via UMD globals)
+  // Strip import statements — React/Recharts are injected at runtime by the client
   code = code.replace(/^\s*import\s+.*?\s+from\s+['"][^'"]+['"];?\s*$/gm, "");
   code = code.replace(/^\s*import\s+['"][^'"]+['"];?\s*$/gm, "");
 
-  // Convert "export default ComponentName" to just capture the name
+  // Detect exported component name
   let exportedComponent = "";
-  const exportDefaultMatch = code.match(/export\s+default\s+(\w+)\s*;?/);
-  if (exportDefaultMatch) {
-    exportedComponent = exportDefaultMatch[1];
-  }
-  // Convert "export default function ComponentName" to just "function ComponentName"
   const exportDefaultFuncMatch = code.match(/export\s+default\s+function\s+(\w+)/);
   if (exportDefaultFuncMatch) {
     exportedComponent = exportDefaultFuncMatch[1];
+  } else {
+    const exportDefaultMatch = code.match(/export\s+default\s+(\w+)\s*;?/);
+    if (exportDefaultMatch) exportedComponent = exportDefaultMatch[1];
   }
+
+  // Strip export keywords
   code = code.replace(/export\s+default\s+(function|class)\s+/g, "$1 ");
   code = code.replace(/^\s*export\s+default\s+\w+\s*;?\s*$/gm, "");
   code = code.replace(/^\s*export\s+/gm, "");
 
-  // Detect component names defined in the code (function/const declarations that start with uppercase)
+  // Detect component names (uppercase function/const/class declarations)
   const componentMatches = code.match(/(?:function|const|class)\s+([A-Z]\w+)/g) || [];
   const componentNames = componentMatches.map((m) => m.replace(/^(?:function|const|class)\s+/, ""));
-
-  // Determine which component to render
   const renderTarget = exportedComponent
     || componentNames.find((n) => n === "App")
     || componentNames[componentNames.length - 1]
     || "";
 
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${args.title || "React Preview"}</title>
-    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    ${extraScripts}
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-      #root { min-height: 100vh; }
-      .react-error { color: #e53935; padding: 20px; font-family: monospace; white-space: pre-wrap; }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
-    <script type="text/babel">
-      // React hooks & helpers
-      const { useState, useEffect, useRef, useMemo, useCallback, useReducer, useContext, createContext, Fragment } = React;
+  // Wrap code: destructure React hooks + Recharts at top, return the component at bottom
+  const wrapped = `const { useState, useEffect, useRef, useMemo, useCallback, useReducer, useContext, createContext, Fragment, memo, forwardRef, lazy, Suspense } = React;
+const _Recharts = typeof Recharts !== 'undefined' ? Recharts : {};
+const { LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ScatterChart, Scatter, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ComposedChart, Treemap, Funnel, FunnelChart, RadialBarChart, RadialBar, Sankey, LabelList, Brush, ReferenceLine, ReferenceArea, ReferenceDot, ErrorBar, Label } = _Recharts;
 
-      // Expose Recharts components as globals if loaded
-      if (typeof Recharts !== 'undefined') {
-        Object.keys(Recharts).forEach(function(k) { window[k] = Recharts[k]; });
-      }
+${code}
 
-      try {
-        ${code}
+return ${renderTarget || "null"};`;
 
-        // Render the component
-        ${renderTarget ? `ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(${renderTarget}));` : "// No component detected"}
-      } catch (err) {
-        document.getElementById('root').innerHTML = '<div class=\"react-error\">Error: ' + err.message + '</div>';
-        console.error(err);
-      }
-    </script>
-</body>
-</html>`;
+  // Compile JSX → JS using esbuild
+  let compiled: string;
+  try {
+    const esbuild = await import("esbuild");
+    const result = await esbuild.transform(wrapped, {
+      loader: "jsx",
+      jsx: "transform",
+      jsxFactory: "React.createElement",
+      jsxFragment: "React.Fragment",
+    });
+    compiled = result.code;
+  } catch (err: any) {
+    return { ok: false, error: `JSX compilation failed: ${err.message}`, outputFiles: [] };
+  }
+
+  // Save as .js with metadata header
+  const filename = `react_${Date.now()}.jsx.js`;
+  const filePath = path.join(outputDir, filename);
+  const meta = JSON.stringify({ title: args.title || "React Component", renderTarget });
+  const output = `// __REACT_META__=${meta}\n${compiled}`;
 
   try {
-    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
-    fs.writeFileSync(filePath, html, "utf8");
+    fs.writeFileSync(filePath, output, "utf8");
     const relPath = `output_file/${filename}`;
     return {
       ok: true,
       outputFiles: [relPath],
-      message: `React app saved to ${relPath}. It will be rendered in the output panel.`,
+      message: `React component compiled to ${relPath}. It will render natively in the output panel.`,
     };
   } catch (err: any) {
     return { ok: false, error: err.message, outputFiles: [] };

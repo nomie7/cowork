@@ -3,3 +3,6 @@ dist/
 uploads/
 .env
 .env.*
+data/chat_history.json
+input_file/
+output_file/

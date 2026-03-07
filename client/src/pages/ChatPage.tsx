@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import { api } from "../utils/api";
 import { useSocket } from "../hooks/useSocket";
 import { Icon } from "../components/Layout";
+import ReactComponentRenderer from "../components/ReactComponentRenderer";
 import "./ChatPage.css";
 
 interface AttachedFile {
@@ -54,9 +55,10 @@ function OutputCanvas({ files }: { files: string[] }) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const images = files.filter((f) => ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"].includes(getFileExt(f)));
-  const htmlFiles = files.filter((f) => getFileExt(f) === "html");
+  const reactFiles = files.filter((f) => f.endsWith(".jsx.js"));
+  const htmlFiles = files.filter((f) => getFileExt(f) === "html" && !f.endsWith(".jsx.js"));
   const pdfFiles = files.filter((f) => getFileExt(f) === "pdf");
-  const otherFiles = files.filter((f) => !images.includes(f) && !htmlFiles.includes(f) && !pdfFiles.includes(f));
+  const otherFiles = files.filter((f) => !images.includes(f) && !reactFiles.includes(f) && !htmlFiles.includes(f) && !pdfFiles.includes(f));
 
   return (
     <div className="output-canvas">
@@ -81,6 +83,21 @@ function OutputCanvas({ files }: { files: string[] }) {
           ))}
         </div>
       )}
+
+      {/* Native React components (compiled JSX) */}
+      {reactFiles.map((f) => (
+        <div key={f} className="canvas-react-wrap">
+          <div className="canvas-html-header">
+            <span>{f.split("/").pop()?.replace(".jsx.js", "")}</span>
+            <a href={api.downloadUrl(f)} download className="canvas-dl-btn" title="Download source">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+            </a>
+          </div>
+          <div className="canvas-react-body">
+            <ReactComponentRenderer src={`/sandbox/${f}?t=${Date.now()}`} />
+          </div>
+        </div>
+      ))}
 
       {/* HTML reports in iframe */}
       {htmlFiles.map((f) => (

@@ -49,12 +49,26 @@ filesRouter.delete("/", (req, res) => {
   }
 });
 
+// Mkdir
+filesRouter.post("/mkdir", (req, res) => {
+  try {
+    const dirPath = req.body.path;
+    if (!dirPath) return res.status(400).json({ error: "path required" });
+    const resolved = validatePath(req.app.locals.sandboxDir, dirPath);
+    if (!fs.existsSync(resolved)) fs.mkdirSync(resolved, { recursive: true });
+    res.json({ success: true, path: dirPath });
+  } catch (err: any) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
 // Upload
 const upload = multer({ dest: "/tmp/cowork-uploads" });
 filesRouter.post("/upload", upload.single("file"), (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "No file" });
-    const destPath = (req.body.path || "") + "/" + req.file.originalname;
+    const destDir = req.body.path || "";
+    const destPath = destDir ? destDir + "/" + req.file.originalname : req.file.originalname;
     const resolved = validatePath(req.app.locals.sandboxDir, destPath);
     const dir = path.dirname(resolved);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });

@@ -1,33 +1,90 @@
-# Tiger Cowork
+# Tiger Cowork v0.1.2
 
-A self-hosted AI-powered workspace that combines chat, file management, code execution, scheduled tasks, and a skill marketplace — all in one web interface. Powered by **TigerBot** LLM with tool-calling capabilities.
+A self-hosted AI-powered workspace that combines chat, file management, code execution, scheduled tasks, and a skill marketplace — all in one web interface. Compatible with any **OpenAI-compatible API** (OpenRouter, TigerBot, Ollama, etc.) with tool-calling capabilities.
+
+## Screenshot
+
+![Tiger Cowork — AI chat with React chart outputs](picture/screenshot1.png)
+
+*AI Chat interface with tool-calling support. The AI reads data files, generates interactive React/Recharts visualizations, and renders them natively in the output panel.*
+
+![Tiger Cowork — Skills management page](picture/screen_shot2.png)
+
+*Skills management page showing 13 installed skills from multiple sources — built-in (Claude), OpenClaw marketplace, and ClawHub community skills. Each skill can be enabled/disabled or uninstalled individually. Skills extend the AI's capabilities with specialized tools like web search, code review, data analysis, git operations, and more.*
+
+## What's New in v0.1.2
+
+- **Context overflow fix** — Resolved "No response from API" errors after extended tool loops by truncating large tool call arguments and results, and building compact summaries for final responses
+- **Improved tool loop reliability** — Added loop detection (same tool+args 3 rounds in a row), consecutive error tracking (stops after 3 failures), and automatic retry for chart/analysis generation
+- **Better chart generation** — When the AI detects chart/graph/analysis requests but no output files were produced, it automatically nudges the LLM to generate them with error-aware retry
+- **React component renderer** — New `ReactComponentRenderer` component for native in-browser rendering of AI-generated React/JSX components with Recharts support
+- **MCP (Model Context Protocol) integration** — Connect external tool servers via Stdio, SSE, or StreamableHTTP transports; tools are auto-discovered and available to the AI
+- **Robust JSON argument parsing** — Fallback parser recovers `run_python` and `run_react` code from malformed JSON tool call arguments
 
 ## Features
 
-- **AI Chat** — Conversational AI assistant (TigerBot) with tool-calling support. The AI can search the web, fetch URLs, execute code, read/write files, and install skills — all from the chat interface.
-- **File Manager** — Browse, create, edit, download, and delete files in a sandboxed directory. Includes a built-in code editor with preview.
-- **Python Execution** — Run Python code directly from the chat or the dedicated Python runner. Output files (charts, reports) render in the output panel.
-- **React Playground** — Generate and render interactive React/JSX components (dashboards, charts with Recharts, forms) right in the browser.
-- **Scheduled Tasks** — Create cron-based scheduled jobs that run shell commands automatically. Supports common presets (every minute, hourly, daily, weekly).
-- **Skills Marketplace (ClawHub)** — Search, install, and manage reusable AI skills from the ClawHub/OpenClaw catalog. Skills extend the AI's capabilities.
-- **Web Search & URL Fetching** — The AI can search the internet (DuckDuckGo or Google) and fetch web pages or APIs.
-- **Real-time Updates** — Socket.IO provides live streaming of AI responses, tool call progress, and execution results.
+### AI Chat with Tool Calling
+- Conversational AI assistant with automatic tool use
+- 12 built-in tools: web search, URL fetch, Python execution, React rendering, shell commands, file read/write/list, skill management, and ClawHub marketplace
+- Up to 8 tool rounds per conversation turn, max 12 tool calls total
+- Real-time streaming of responses and tool call progress via Socket.IO
+- Automatic output file generation for analysis/chart requests
+
+### Python Execution
+- Run Python code directly from chat or the dedicated Python runner
+- Working directory is `output_file/` with `PROJECT_DIR` variable for accessing project files
+- 60-second timeout, output truncated at 20KB stdout / 5KB stderr
+- Generated files (charts, reports, CSVs) render in the output panel
+
+### React Playground
+- Generate interactive React/JSX components from chat
+- Server-side JSX compilation via esbuild
+- Recharts library available as globals (LineChart, BarChart, PieChart, etc.)
+- Components render natively in the browser output panel via `ReactComponentRenderer`
+- Import statements are auto-stripped; React hooks destructured automatically
+
+### File Manager
+- Browse, create, edit, download, and delete files in a sandboxed directory
+- Built-in code editor with preview
+- AI can read/write files via tool calls
+
+### Scheduled Tasks
+- Create cron-based scheduled jobs that run shell commands
+- Common presets: every minute, hourly, daily, weekly
+- Pause, resume, or delete tasks from the UI
+
+### Skills & ClawHub Marketplace
+- Search, install, and manage reusable AI skills from ClawHub/OpenClaw catalog
+- AI can browse and install skills directly from chat
+- Skills extend the AI's tool-calling capabilities via `SKILL.md` instructions
+
+### MCP Tool Integration
+- Connect external MCP servers (Stdio, SSE, StreamableHTTP)
+- Auto-discovers tools from connected servers
+- Tools appear alongside built-in tools for the AI to use
+- Configure via Settings page; supports multiple simultaneous connections
+
+### Web Search
+- DuckDuckGo (instant answer + HTML scraping) built-in
+- Optional Google Custom Search API support
+- Wikipedia search as supplementary source
 
 ## Tech Stack
 
-| Layer    | Technology                                      |
-|----------|-------------------------------------------------|
-| Frontend | React 18, React Router, Vite, Socket.IO Client  |
-| Backend  | Node.js, Express, Socket.IO, TypeScript          |
-| AI       | TigerBot API (OpenAI-compatible)                 |
-| Runtime  | tsx (TypeScript execution), node-cron             |
+| Layer    | Technology                                                |
+|----------|-----------------------------------------------------------|
+| Frontend | React 18, React Router 6, Vite 5, Socket.IO Client 4     |
+| Backend  | Node.js, Express 4, Socket.IO 4, TypeScript               |
+| AI       | Any OpenAI-compatible API (OpenRouter, TigerBot, etc.)     |
+| Tools    | MCP SDK 1.27, esbuild (JSX), node-cron, Python 3          |
+| Data     | JSON file-based persistence (`data/` directory)            |
 
 ## Prerequisites
 
 - **Node.js** >= 18
 - **npm** (comes with Node.js)
 - **Python 3** (optional, for Python code execution)
-- **TigerBot API Key** (or any OpenAI-compatible API key)
+- **API Key** for any OpenAI-compatible provider (OpenRouter, TigerBot, Ollama, etc.)
 
 ## Installation
 
@@ -38,29 +95,22 @@ git clone https://github.com/Sompote/tiger_cowork.git
 cd tiger_cowork
 ```
 
-### 2. Install server dependencies
+### 2. Install dependencies
 
 ```bash
 npm install
+cd client && npm install && cd ..
 ```
 
-### 3. Install client dependencies
-
-```bash
-cd client
-npm install
-cd ..
-```
-
-### 4. Run in development mode
+### 3. Run in development mode
 
 ```bash
 npm run dev
 ```
 
-The app will start at **http://localhost:3001** with hot-reload enabled for the frontend.
+The app starts at **http://localhost:3001** with hot-reload via Vite.
 
-### 5. Build and run for production
+### 4. Build and run for production
 
 ```bash
 npm run build
@@ -69,30 +119,35 @@ npm start
 
 ## Configuration
 
-After launching the app, go to the **Settings** page in the web UI to configure:
-
 ### API Key Setup
 
-1. Open the app in your browser at `http://localhost:3001`
-2. Navigate to **Settings** (sidebar)
-3. Enter your **TigerBot API Key**
-4. (Optional) Change the **Model** — default is `TigerBot-70B-Chat`
-5. (Optional) Change the **API URL** if using a different OpenAI-compatible endpoint
+1. Open the app at `http://localhost:3001`
+2. Navigate to **Settings** in the sidebar
+3. Enter your **API Key** (any OpenAI-compatible provider)
+4. Set the **API URL** — e.g. `https://openrouter.ai/api/v1` for OpenRouter
+5. Choose a **Model** — e.g. `z-ai/glm-5`, `TigerBot-70B-Chat`, etc.
 6. Click **Test Connection** to verify
 
-### Environment Variables (optional)
+### Environment Variables
 
-| Variable      | Default        | Description                              |
-|---------------|----------------|------------------------------------------|
-| `PORT`        | `3001`         | Server port                              |
-| `SANDBOX_DIR` | `.` (project root) | Directory for file manager sandbox  |
-| `NODE_ENV`    | `development`  | Set to `production` for built assets     |
-
-Example:
+| Variable      | Default            | Description                          |
+|---------------|--------------------|--------------------------------------|
+| `PORT`        | `3001`             | Server port                          |
+| `SANDBOX_DIR` | `.` (project root) | Directory for file manager sandbox   |
+| `NODE_ENV`    | `development`      | Set to `production` for built assets |
 
 ```bash
 PORT=8080 SANDBOX_DIR=/home/user/workspace npm run dev
 ```
+
+### MCP Server Configuration
+
+1. Go to **Settings** > MCP Tools
+2. Add a server with a name and URL:
+   - HTTP/SSE: `https://mcp-server.example.com/sse`
+   - Stdio: `node /path/to/mcp-server.js`
+3. Enable the server — tools are auto-discovered
+4. Connected MCP tools appear as `mcp_{serverName}_{toolName}` in the AI's toolbox
 
 ## Usage Guide
 
@@ -100,84 +155,103 @@ PORT=8080 SANDBOX_DIR=/home/user/workspace npm run dev
 
 1. Open the app — you land on the **Chat** page
 2. Type a message and press Enter
-3. The AI will respond and can automatically use tools:
+3. The AI responds and can automatically use tools:
    - **Web search** — "Search for latest Node.js release"
-   - **Code execution** — "Write a Python script to generate a chart"
+   - **Code execution** — "Write a Python script to generate a sales chart"
    - **React components** — "Build a dashboard with Recharts"
    - **File operations** — "Read the contents of config.json"
    - **Shell commands** — "Install pandas with pip"
-4. Tool calls and results appear in real-time as the AI works
-5. Generated files (charts, reports, HTML) render in the output panel
+   - **Skills** — "Search ClawHub for a YouTube transcript skill"
+4. Tool calls and results appear in real-time
+5. Generated files (charts, reports, HTML, React components) render in the output panel
 
-### Manage Files
+### File Manager
 
 1. Go to the **Files** page
 2. Browse the sandbox directory
 3. Click a file to preview, click **Edit** to modify
-4. Use **New file** to create files
-5. Download files with the download button
+4. Use **New file** to create files, download with the download button
 
 ### Scheduled Tasks
 
 1. Go to the **Tasks** page
 2. Click **New task**
-3. Set a name, cron schedule (use presets or custom), and shell command
+3. Set name, cron schedule (use presets or custom), and shell command
 4. Tasks run automatically in the background
-5. Pause, resume, or delete tasks as needed
 
 ### Skills
 
 1. Go to the **Skills** page
 2. Browse the built-in catalog or search ClawHub
-3. Install skills to extend the AI's capabilities
-4. The AI can also install skills directly from chat: "Install the duckduckgo-search skill"
-
-### Settings
-
-- Configure your API key and model
-- Enable/disable web search
-- Set up Google Custom Search (optional)
-- Manage MCP tool integrations
+3. Install skills to extend AI capabilities
+4. AI can install skills from chat: "Install the duckduckgo-search skill"
 
 ## Project Structure
 
 ```
 tiger_cowork/
 ├── server/
-│   ├── index.ts              # Express + Socket.IO server entry
+│   ├── index.ts                    # Express + Socket.IO + Vite dev server entry
 │   ├── routes/
-│   │   ├── chat.ts           # Chat session CRUD + message API
-│   │   ├── files.ts          # File manager (list, read, write, delete)
-│   │   ├── tasks.ts          # Scheduled tasks CRUD
-│   │   ├── skills.ts         # Skills catalog and management
-│   │   ├── settings.ts       # App settings API
-│   │   ├── python.ts         # Python code execution endpoint
-│   │   ├── tools.ts          # Web search, URL fetch, MCP proxy
-│   │   └── clawhub.ts        # ClawHub skill marketplace
+│   │   ├── chat.ts                 # Chat session CRUD + message API
+│   │   ├── files.ts                # File manager (list, read, write, delete)
+│   │   ├── tasks.ts                # Scheduled tasks CRUD
+│   │   ├── skills.ts               # Skills catalog and management
+│   │   ├── settings.ts             # App settings API
+│   │   ├── python.ts               # Python code execution endpoint
+│   │   ├── tools.ts                # Web search, URL fetch, MCP proxy
+│   │   └── clawhub.ts              # ClawHub skill marketplace
 │   └── services/
-│       ├── tigerbot.ts       # TigerBot API client (chat, streaming, tools)
-│       ├── socket.ts         # Real-time Socket.IO event handlers
-│       ├── scheduler.ts      # Cron job scheduler (node-cron)
-│       ├── data.ts           # JSON file-based data persistence
-│       ├── python.ts         # Python subprocess runner
-│       ├── toolbox.ts        # Tool definitions for AI function calling
-│       ├── sandbox.ts        # Sandbox file operations
-│       └── clawhub.ts        # ClawHub marketplace service
+│       ├── tigerbot.ts             # LLM API client (chat, streaming, tool loop)
+│       ├── toolbox.ts              # 12 built-in tool definitions + dispatcher
+│       ├── mcp.ts                  # MCP client (connect, discover, call tools)
+│       ├── socket.ts               # Real-time Socket.IO event handlers
+│       ├── scheduler.ts            # Cron job scheduler (node-cron)
+│       ├── data.ts                 # JSON file-based data persistence
+│       ├── python.ts               # Python subprocess runner
+│       ├── sandbox.ts              # Sandbox file operations
+│       └── clawhub.ts              # ClawHub marketplace service
 ├── client/
 │   ├── src/
-│   │   ├── App.tsx           # React Router setup
-│   │   ├── main.tsx          # App entry point
-│   │   ├── pages/            # Chat, Files, Tasks, Skills, Settings pages
-│   │   ├── components/       # Layout and shared components
-│   │   ├── hooks/            # useSocket custom hook
-│   │   └── styles/           # Global CSS
+│   │   ├── App.tsx                 # React Router setup
+│   │   ├── main.tsx                # App entry point
+│   │   ├── pages/                  # Chat, Files, Tasks, Skills, Settings pages
+│   │   │   └── ChatPage.tsx        # Main chat interface with output panel
+│   │   ├── components/
+│   │   │   ├── Layout.tsx          # App layout with sidebar navigation
+│   │   │   └── ReactComponentRenderer.tsx  # Native React component renderer
+│   │   ├── hooks/                  # useSocket custom hook
+│   │   └── styles/                 # Global CSS
 │   ├── package.json
 │   └── vite.config.ts
-├── data/                     # Auto-created JSON data storage
-├── skills/                   # Installed ClawHub skills
+├── data/                           # Auto-created JSON data storage
+│   ├── settings.json               # API keys, model, MCP config
+│   ├── chat_history.json           # Chat sessions and messages
+│   ├── tasks.json                  # Scheduled task definitions
+│   └── skills.json                 # Installed skills registry
+├── output_file/                    # Generated output files (charts, reports)
+├── skills/                         # Installed ClawHub skills
 ├── package.json
-└── tsconfig.json
+├── tsconfig.json
+└── .gitignore
 ```
+
+## Built-in AI Tools
+
+| Tool             | Description                                              |
+|------------------|----------------------------------------------------------|
+| `web_search`     | Search via DuckDuckGo/Google/Wikipedia                   |
+| `fetch_url`      | Fetch content from any URL (JSON or text)                |
+| `run_python`     | Execute Python code with file output support             |
+| `run_react`      | Compile and render React/JSX components with Recharts    |
+| `run_shell`      | Execute shell commands (30s timeout)                     |
+| `read_file`      | Read file contents (truncated at 30KB)                   |
+| `write_file`     | Write or append content to files                         |
+| `list_files`     | List directory contents (max 200 entries)                |
+| `list_skills`    | List all installed skills (built-in + ClawHub)           |
+| `load_skill`     | Load a skill's SKILL.md instructions                     |
+| `clawhub_search` | Search the ClawHub skill marketplace                     |
+| `clawhub_install`| Install a skill from ClawHub by slug                     |
 
 ## API Endpoints
 
@@ -209,15 +283,31 @@ tiger_cowork/
 
 ## Socket.IO Events
 
-| Event             | Direction       | Description                          |
-|-------------------|-----------------|--------------------------------------|
-| `chat:send`       | Client -> Server | Send a chat message                 |
-| `chat:chunk`      | Server -> Client | Streamed AI response chunk          |
-| `chat:status`     | Server -> Client | Status update (thinking, tool call) |
-| `chat:response`   | Server -> Client | Final complete response             |
-| `python:run`      | Client -> Server | Execute Python code                 |
-| `python:status`   | Server -> Client | Python execution status             |
-| `python:result`   | Server -> Client | Python execution result             |
+| Event             | Direction        | Description                          |
+|-------------------|------------------|--------------------------------------|
+| `chat:send`       | Client → Server  | Send a chat message                  |
+| `chat:chunk`      | Server → Client  | Streamed AI response chunk           |
+| `chat:status`     | Server → Client  | Status update (thinking, tool call)  |
+| `chat:response`   | Server → Client  | Final complete response              |
+| `python:run`      | Client → Server  | Execute Python code                  |
+| `python:status`   | Server → Client  | Python execution status              |
+| `python:result`   | Server → Client  | Python execution result              |
+
+## Changelog
+
+### v0.1.2 (2026-03-07)
+- Fix context overflow causing "No response from API" after tool loops
+- Improve tool loop reliability with loop detection and error tracking
+- Add automatic chart generation retry for analysis tasks
+- Add `ReactComponentRenderer` for native React component rendering
+- Add MCP (Model Context Protocol) integration with Stdio/SSE/StreamableHTTP
+- Add `.gitignore` entries for `output_file/`, `input_file/`, and chat history
+
+### v0.1.1
+- Improve tool loop reliability and chart generation for analysis tasks
+
+### v0.1.0
+- Initial release: Express + Vite web app with AI chat, file manager, Python execution, scheduled tasks, skills marketplace, and web search
 
 ## License
 
