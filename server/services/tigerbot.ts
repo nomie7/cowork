@@ -3,7 +3,7 @@ import { getTools, callTool } from "./toolbox";
 
 interface ChatMessage {
   role: "user" | "assistant" | "system" | "tool";
-  content: string;
+  content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>;
   tool_calls?: any[];
   tool_call_id?: string;
 }
@@ -53,7 +53,14 @@ async function llmCall(messages: ChatMessage[], options: { tools?: any[]; model?
     throw new Error(`API Error (${response.status}): ${error}`);
   }
 
-  return response.json();
+  const json = await response.json();
+  if (!json.choices?.length) {
+    console.error(`[llmCall] API returned no choices. Response:`, JSON.stringify(json).slice(0, 2000));
+    // Check if messages contain image content for debugging
+    const hasImages = messages.some(m => Array.isArray(m.content) && m.content.some((p: any) => p.type === 'image_url'));
+    if (hasImages) console.error(`[llmCall] Request included images. Model may not support vision or format is wrong.`);
+  }
+  return json;
 }
 
 // Tool-calling loop (like Tiger_bot's runWithTools)
@@ -92,7 +99,7 @@ export async function callTigerBotWithTools(
 
     const choice = data.choices?.[0];
     if (!choice) {
-      console.log(`[ToolLoop] No response from API at round ${round}. Breaking to generate summary.`);
+      console.log(`[ToolLoop] No response from API at round ${round}. Full API response:`, JSON.stringify(data).slice(0, 1000));
       break;
     }
 
@@ -247,9 +254,11 @@ export async function callTigerBotWithTools(
 
   // Check if user likely wanted output files but none were generated
   const hasOutputFiles = toolResults.some((tr) => tr.result?.outputFiles?.length > 0);
-  const userWantsOutput = allMessages.some((m) =>
-    m.role === "user" && /\b(chart|graph|plot|report|analy[sz]|visual|diagram|figure)\b/i.test(m.content)
-  );
+  const userWantsOutput = allMessages.some((m) => {
+    if (m.role !== "user") return false;
+    const text = typeof m.content === "string" ? m.content : m.content.map((p) => p.text || "").join(" ");
+    return /\b(chart|graph|plot|report|analy[sz]|visual|diagram|figure)\b/i.test(text);
+  });
 
   // If user wanted graphs/analysis but none were generated, do extra rounds to generate them
   if (userWantsOutput && !hasOutputFiles && totalToolCalls > 0) {

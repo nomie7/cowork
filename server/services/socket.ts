@@ -4,10 +4,11 @@ import { callTigerBotWithTools, callTigerBot } from "./tigerbot";
 import { getChatHistory, saveChatHistory, ChatSession, getSettings } from "./data";
 import { runPython } from "./python";
 import path from "path";
+import { execSync } from "child_process";
+import fs from "fs";
 
 function buildSystemPrompt(): string {
   // Gather installed clawhub skills
-  const fs = require("fs");
   const skillsDir = path.resolve("Tiger_bot/skills");
   let installedSkills: string[] = [];
   try {
@@ -68,8 +69,8 @@ export function setupSocket(io: Server): void {
   io.on("connection", (socket: Socket) => {
     console.log("Client connected:", socket.id);
 
-    socket.on("chat:send", async (data: { sessionId: string; message: string }) => {
-      const { sessionId, message } = data;
+    socket.on("chat:send", async (data: { sessionId: string; message: string; images?: { path: string; type: string }[] }) => {
+      const { sessionId, message, images } = data;
       const sessions = getChatHistory();
       let session = sessions.find((s) => s.id === sessionId);
 
@@ -117,11 +118,63 @@ export function setupSocket(io: Server): void {
         return;
       }
 
-      // Use tool-calling AI loop
+      // Use tool-calling AI loop — build multimodal content for images
+      const settings = getSettings();
+      const sandboxDir = settings.sandboxDir || path.resolve("sandbox");
       const chatMessages = session.messages.map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.content,
       }));
+
+      // If the latest user message has images, convert to multimodal content
+      console.log(`[Image] images received:`, images ? JSON.stringify(images) : "none");
+      fs.writeFileSync("/tmp/cowork-image-debug.log", `${new Date().toISOString()} images: ${JSON.stringify(images)}\nmessage: ${message.slice(0,200)}\n`, { flag: "a" });
+      if (images && images.length > 0) {
+        const lastIdx = chatMessages.length - 1;
+        const textContent = chatMessages[lastIdx].content;
+        const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+          { type: "text", text: textContent },
+        ];
+        for (const img of images) {
+          try {
+            const imgPath = path.resolve(img.path);
+            let imgBuffer = fs.readFileSync(imgPath);
+            let mimeType = img.type || "image/png";
+
+            // Compress if larger than 4MB (API limit is 5MB for base64)
+            const MAX_SIZE = 4 * 1024 * 1024;
+            if (imgBuffer.length > MAX_SIZE) {
+              console.log(`[Image] ${img.path} is ${(imgBuffer.length / 1024 / 1024).toFixed(1)}MB, compressing...`);
+              try {
+                const tmpOut = `/tmp/cowork_resized_${Date.now()}.jpg`;
+                execSync(`python3 -c "
+from PIL import Image
+import sys
+img = Image.open('${imgPath.replace(/'/g, "\\'")}')
+img.thumbnail((1600, 1600), Image.LANCZOS)
+img = img.convert('RGB')
+img.save('${tmpOut}', 'JPEG', quality=80)
+"`, { timeout: 10000 });
+                imgBuffer = fs.readFileSync(tmpOut);
+                mimeType = "image/jpeg";
+                fs.unlinkSync(tmpOut);
+                console.log(`[Image] Compressed to ${(imgBuffer.length / 1024 / 1024).toFixed(1)}MB`);
+              } catch (compErr: any) {
+                console.error(`[Image] Compression failed:`, compErr.message);
+              }
+            }
+
+            const base64 = imgBuffer.toString("base64");
+            contentParts.push({
+              type: "image_url",
+              image_url: { url: `data:${mimeType};base64,${base64}` },
+            });
+          } catch (err: any) {
+            console.error(`[Image] Failed to read ${img.path}:`, err.message);
+          }
+        }
+        (chatMessages[lastIdx] as any).content = contentParts;
+      }
 
       socket.emit("chat:status", { status: "thinking" });
       const toolsUsed: string[] = [];

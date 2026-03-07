@@ -108,6 +108,7 @@ The bottom section shows all **Available Tools** organized by category — web s
 docker run -it -p 3001:3001 ubuntu bash
 
 # Inside the container:
+apt-get update && apt-get install -y curl git python3 python3-pip
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt-get install -y nodejs
 
@@ -115,6 +116,7 @@ node --version
 
 git clone https://github.com/Sompote/tiger_cowork.git
 cd tiger_cowork
+npm i -g clawhub
 npm install && cd client && npm install && cd ..
 npm run dev
 ```
@@ -140,6 +142,7 @@ cd tiger_cowork
 ### 2. Install dependencies
 
 ```bash
+npm i -g clawhub
 npm install
 cd client && npm install && cd ..
 ```

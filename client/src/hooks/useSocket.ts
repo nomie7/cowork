@@ -13,8 +13,8 @@ export function useSocket() {
     return () => { socket.disconnect(); };
   }, []);
 
-  const sendMessage = useCallback((sessionId: string, message: string) => {
-    socketRef.current?.emit("chat:send", { sessionId, message });
+  const sendMessage = useCallback((sessionId: string, message: string, images?: { path: string; type: string }[]) => {
+    socketRef.current?.emit("chat:send", { sessionId, message, images });
   }, []);
 
   const onChunk = useCallback((cb: (data: { sessionId: string; content: string }) => void) => {

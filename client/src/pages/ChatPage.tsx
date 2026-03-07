@@ -162,6 +162,7 @@ export default function ChatPage() {
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [uploading, setUploading] = useState(false);
   const [outputPanelOpen, setOutputPanelOpen] = useState(true);
+  const [mobileSidebar, setMobileSidebar] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -269,12 +270,25 @@ export default function ChatPage() {
   const handleSend = useCallback(() => {
     if ((!input.trim() && attachedFiles.length === 0) || isLoading) return;
 
-    // Build message with attachment info
+    // Separate image attachments for multimodal API payload
+    const imageExts = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+    const imageAttachments = attachedFiles.filter((f) => imageExts.includes(getFileExt(f.name)));
+    const nonImageAttachments = attachedFiles.filter((f) => !imageExts.includes(getFileExt(f.name)));
+
+    // Build message with non-image attachment info
     let msg = input.trim();
-    if (attachedFiles.length > 0) {
-      const fileInfo = attachedFiles.map((f) => `[Attached file: ${f.name} (${f.type}, ${formatFileSize(f.size)}) saved at: ${f.path}]`).join("\n");
+    if (nonImageAttachments.length > 0) {
+      const fileInfo = nonImageAttachments.map((f) => `[Attached file: ${f.name} (${f.type}, ${formatFileSize(f.size)}) saved at: ${f.path}]`).join("\n");
       msg = msg ? `${msg}\n\n${fileInfo}` : fileInfo;
     }
+    // Add image file info as text context (the actual image is sent via multimodal payload)
+    if (imageAttachments.length > 0) {
+      const imgInfo = imageAttachments.map((f) => `[Image attached: ${f.name}]`).join("\n");
+      msg = msg ? `${msg}\n\n${imgInfo}` : `What's in this image?\n\n${imgInfo}`;
+    }
+
+    // Build images payload for multimodal API
+    const images = imageAttachments.map((f) => ({ path: f.path, type: f.type }));
 
     const userMessage: Message = {
       role: "user",
@@ -293,12 +307,12 @@ export default function ChatPage() {
         setActiveSession(session.id);
         setMessages([userMessage]);
         setIsLoading(true);
-        sendMessage(session.id, msg);
+        sendMessage(session.id, msg, images.length > 0 ? images : undefined);
       });
     } else {
       setMessages((prev) => [...prev, userMessage]);
       setIsLoading(true);
-      sendMessage(activeSession, msg);
+      sendMessage(activeSession, msg, images.length > 0 ? images : undefined);
     }
   }, [input, activeSession, isLoading, sendMessage, attachedFiles]);
 
@@ -348,8 +362,9 @@ export default function ChatPage() {
 
   return (
     <div className="chat-page">
-      <div className="chat-sidebar">
-        <button className="btn btn-primary new-chat-btn" onClick={createNewSession}>
+      <div className={`chat-sidebar-backdrop ${mobileSidebar ? "visible" : ""}`} onClick={() => setMobileSidebar(false)} />
+      <div className={`chat-sidebar ${mobileSidebar ? "mobile-open" : ""}`}>
+        <button className="btn btn-primary new-chat-btn" onClick={() => { createNewSession(); setMobileSidebar(false); }}>
           <Icon name="add" /> New chat
         </button>
         <div className="session-list">
@@ -357,7 +372,7 @@ export default function ChatPage() {
             <div
               key={s.id}
               className={`session-item ${activeSession === s.id ? "active" : ""}`}
-              onClick={() => setActiveSession(s.id)}
+              onClick={() => { setActiveSession(s.id); setMobileSidebar(false); }}
             >
               <span className="session-title">{s.title}</span>
               <button className="session-delete btn-icon btn-ghost" onClick={(e) => deleteSession(s.id, e)}>
@@ -369,6 +384,10 @@ export default function ChatPage() {
       </div>
 
       <div className="chat-main" onDrop={handleDrop} onDragOver={handleDragOver}>
+        <button className="mobile-sessions-toggle" onClick={() => setMobileSidebar(true)}>
+          <Icon name="chat" />
+          <span>{activeSession ? sessions.find(s => s.id === activeSession)?.title || "Chat" : "Sessions"}</span>
+        </button>
         {!activeSession && messages.length === 0 ? (
           <div className="chat-empty">
             <h1>Tiger Cowork</h1>
