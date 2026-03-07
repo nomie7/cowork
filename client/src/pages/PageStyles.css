@@ -482,3 +482,113 @@
   font-size: 15px;
   margin-bottom: 4px;
 }
+
+/* ─── Mobile ─── */
+@media (max-width: 768px) {
+  .page {
+    padding: 16px 12px;
+  }
+
+  .page-header {
+    margin-bottom: 16px;
+  }
+
+  .page-header h1 {
+    font-size: 20px;
+  }
+
+  /* Stack file browser vertically */
+  .page-split {
+    flex-direction: column;
+  }
+
+  .panel:first-child {
+    max-width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    max-height: 45vh;
+  }
+
+  .panel {
+    padding: 12px;
+  }
+
+  .editor-panel {
+    flex: 1;
+    min-height: 200px;
+  }
+
+  /* Tabs: horizontal scroll on small screens */
+  .tab-bar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+    gap: 2px;
+  }
+
+  .tab {
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  /* Cards */
+  .card {
+    padding: 14px;
+  }
+
+  .card-header {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .card-actions {
+    align-self: flex-end;
+  }
+
+  .card-title-row {
+    flex-wrap: wrap;
+  }
+
+  /* Inline forms stack vertically */
+  .inline-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .inline-form input {
+    width: 100%;
+  }
+
+  /* Panel header */
+  .panel-header {
+    flex-wrap: wrap;
+  }
+
+  .panel-actions {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  /* File list */
+  .file-size {
+    display: none;
+  }
+
+  /* MCP tool items */
+  .tool-item {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* Form actions */
+  .form-actions {
+    flex-wrap: wrap;
+  }
+
+  /* Settings grid */
+  .settings-grid .card h3 {
+    font-size: 15px;
+  }
+}

@@ -1,4 +1,4 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import "./Layout.css";
 
@@ -30,10 +30,31 @@ function Icon({ name }: { name: string }) {
 
 export { Icon };
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return isMobile;
+}
+
 export default function Layout({ children }: { children: ReactNode }) {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const isMobile = useIsMobile();
+  const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Close sidebar on mobile when route changes
+  useEffect(() => {
+    if (isMobile) setSidebarOpen(false);
+  }, [location.pathname, isMobile]);
+
+  const handleNav = (path: string) => {
+    navigate(path);
+    if (isMobile) setSidebarOpen(false);
+  };
 
   return (
     <div className="layout">
@@ -49,13 +70,16 @@ export default function Layout({ children }: { children: ReactNode }) {
       </header>
 
       <div className="main-container">
+        {sidebarOpen && isMobile && (
+          <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />
+        )}
         {sidebarOpen && (
           <nav className="sidebar">
             {NAV_ITEMS.map((item) => (
               <button
                 key={item.path}
                 className={`nav-item ${location.pathname === item.path ? "active" : ""}`}
-                onClick={() => navigate(item.path)}
+                onClick={() => handleNav(item.path)}
               >
                 <Icon name={item.icon} />
                 <span>{item.label}</span>
