@@ -20,6 +20,30 @@
     "reddit": {
       "version": "1.0.0",
       "installedAt": 1772835547495
+    },
+    "web-pilot": {
+      "version": "1.0.0",
+      "installedAt": 1772857505202
+    },
+    "reddit-readonly": {
+      "version": "1.0.0",
+      "installedAt": 1772857768524
+    },
+    "openclaw-tavily-search": {
+      "version": "0.1.0",
+      "installedAt": 1772867278062
+    },
+    "liang-tavily-search": {
+      "version": "1.0.1",
+      "installedAt": 1772870438753
+    },
+    "tavily-search": {
+      "version": "1.0.0",
+      "installedAt": 1772878117923
+    },
+    "agent-browser": {
+      "version": "0.2.0",
+      "installedAt": 1772878778867
     }
   }
 }

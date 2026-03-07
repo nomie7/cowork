@@ -13,7 +13,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { exec } from 'child_process';
 
-const BASE_URL = 'https://www.reddit.com';
+const BASE_URL = 'https://old.reddit.com';
 const OAUTH_URL = 'https://oauth.reddit.com';
 const USER_AGENT = 'script:clawdbot-reddit:v1.0.0';
 const TOKEN_FILE = join(homedir(), '.reddit-token.json');
