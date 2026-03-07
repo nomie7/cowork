@@ -1,5 +1,7 @@
 # Tiger Cowork v0.1.2
 
+> **⚠️ WARNING: This application executes AI-generated code, shell commands, and third-party skills on your machine. Please run it inside a sandboxed environment (e.g. Docker) to protect your host system. See [Security Notice](#security-notice) below.**
+
 A self-hosted AI-powered workspace that combines chat, file management, code execution, scheduled tasks, and a skill marketplace — all in one web interface. Compatible with any **OpenAI-compatible API** (OpenRouter, TigerBot, Ollama, etc.) with tool-calling capabilities.
 
 ## Screenshot
