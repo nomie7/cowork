@@ -79,6 +79,28 @@ A self-hosted AI-powered workspace that combines chat, file management, code exe
 | Tools    | MCP SDK 1.27, esbuild (JSX), node-cron, Python 3          |
 | Data     | JSON file-based persistence (`data/` directory)            |
 
+## Security Notice
+
+> **⚠️ This app can execute shell commands, Python code, and install third-party skills.** For safety, it is strongly recommended to run Tiger Cowork inside a sandboxed environment such as a **Docker container**.
+
+### Recommended: Run in Docker (Ubuntu)
+
+```bash
+docker run -it --name cowork -p 3001:3001 ubuntu:22.04 bash
+
+# Inside the container:
+apt update && apt install -y curl git python3
+curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+apt install -y nodejs
+
+git clone https://github.com/Sompote/tiger_cowork.git
+cd tiger_cowork
+npm install && cd client && npm install && cd ..
+npm run dev
+```
+
+This ensures that any code execution, shell commands, or skill scripts run in an isolated environment and cannot affect your host system.
+
 ## Prerequisites
 
 - **Node.js** >= 18
