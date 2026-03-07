@@ -17,6 +17,10 @@ export default function SkillsPage() {
   const [catalog, setCatalog] = useState<Skill[]>([]);
   const [tab, setTab] = useState<"installed" | "catalog" | "clawhub" | "custom">("installed");
   const [customForm, setCustomForm] = useState({ name: "", description: "", script: "" });
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadPreview, setUploadPreview] = useState<{ name: string; description: string; body: string } | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const [clawhubQuery, setClawhubQuery] = useState("");
   const [clawhubResults, setClawhubResults] = useState("");
   const [clawhubLoading, setClawhubLoading] = useState(false);
@@ -149,6 +153,50 @@ export default function SkillsPage() {
     setInstalled((prev) => [...prev, result]);
     setCustomForm({ name: "", description: "", script: "" });
     setTab("installed");
+  };
+
+  const handleSkillFile = (file: File) => {
+    setUploadFile(file);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      const { fm, body } = parseFrontmatter(content);
+      setUploadPreview({
+        name: fm.name || file.name.replace(/\.[^.]+$/, ""),
+        description: fm.description || "",
+        body,
+      });
+    };
+    reader.readAsText(file);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleSkillFile(file);
+  };
+
+  const installUploadedSkill = async () => {
+    if (!uploadFile) return;
+    setUploading(true);
+    try {
+      const result = await api.uploadSkill(uploadFile);
+      if (result.error) {
+        alert("Upload failed: " + result.error);
+      } else {
+        setInstalled((prev) => {
+          const exists = prev.some((s) => s.id === result.id);
+          return exists ? prev.map((s) => (s.id === result.id ? result : s)) : [...prev, result];
+        });
+        setUploadFile(null);
+        setUploadPreview(null);
+        setTab("installed");
+      }
+    } catch (err: any) {
+      alert("Upload error: " + err.message);
+    }
+    setUploading(false);
   };
 
   const isInstalled = (name: string) => installed.some((s) => s.name === name);
@@ -379,6 +427,61 @@ export default function SkillsPage() {
 
       {tab === "custom" && (
         <div className="card form-card">
+          <h3>Upload SKILL.md File</h3>
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            onClick={() => { const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".md,.txt"; inp.onchange = (e) => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) handleSkillFile(f); }; inp.click(); }}
+            style={{
+              border: `2px dashed ${dragOver ? "#1967d2" : "var(--border, #ccc)"}`,
+              borderRadius: 8,
+              padding: "28px 16px",
+              textAlign: "center",
+              cursor: "pointer",
+              background: dragOver ? "rgba(25,103,210,0.05)" : "transparent",
+              transition: "all 0.2s",
+              marginBottom: 12,
+            }}
+          >
+            {uploadFile ? (
+              <div>
+                <strong>{uploadFile.name}</strong>
+                <span style={{ marginLeft: 8, fontSize: 12, opacity: 0.6 }}>({(uploadFile.size / 1024).toFixed(1)} KB)</span>
+              </div>
+            ) : (
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>Drop SKILL.md file here or click to browse</div>
+                <div style={{ fontSize: 12, opacity: 0.5, marginTop: 4 }}>Supports .md and .txt files</div>
+              </div>
+            )}
+          </div>
+          {uploadPreview && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                <strong>{uploadPreview.name}</strong>
+                {uploadPreview.description && <span style={{ fontSize: 12, opacity: 0.6 }}>— {uploadPreview.description}</span>}
+              </div>
+              <div style={{
+                maxHeight: 200, overflow: "auto", fontSize: 12, padding: "10px 14px",
+                background: "var(--bg-secondary, #f8f9fa)", borderRadius: 6,
+                border: "1px solid var(--border, #ddd)", lineHeight: 1.6,
+              }}
+                dangerouslySetInnerHTML={{ __html: renderMarkdown(uploadPreview.body.slice(0, 2000)) }}
+              />
+              <div className="form-actions" style={{ marginTop: 10 }}>
+                <button className="btn btn-primary" onClick={installUploadedSkill} disabled={uploading}>
+                  {uploading ? "Installing..." : "Install Skill"}
+                </button>
+                <button className="btn btn-ghost" onClick={() => { setUploadFile(null); setUploadPreview(null); }}>
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
+
+          <hr style={{ border: "none", borderTop: "1px solid var(--border, #ddd)", margin: "16px 0" }} />
+
           <h3>Create Custom Skill</h3>
           <div className="form-group">
             <label>Name</label>

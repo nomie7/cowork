@@ -44,6 +44,12 @@ export const api = {
   getSkills: () => request("/skills"),
   getSkillCatalog: () => request("/skills/catalog"),
   installSkill: (data: any) => request("/skills", { method: "POST", body: JSON.stringify(data) }),
+  uploadSkill: async (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${BASE}/skills/upload`, { method: "POST", body: form });
+    return res.json();
+  },
   updateSkill: (id: string, data: any) => request(`/skills/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   deleteSkill: (id: string) => request(`/skills/${id}`, { method: "DELETE" }),
 

@@ -1,9 +1,14 @@
 import { Router } from "express";
 import { v4 as uuid } from "uuid";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 import { getSkills, saveSkills } from "../services/data";
 import { listInstalledSkills } from "../services/clawhub";
 
 export const skillsRouter = Router();
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 1024 * 1024 } });
 
 skillsRouter.get("/", (_req, res) => {
   const skills = getSkills();
@@ -63,6 +68,65 @@ skillsRouter.delete("/:id", (req, res) => {
   skills = skills.filter((s) => s.id !== req.params.id);
   saveSkills(skills);
   res.json({ success: true });
+});
+
+// Upload SKILL.md file
+skillsRouter.post("/upload", upload.single("file"), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+
+    const content = req.file.buffer.toString("utf-8");
+
+    // Parse frontmatter
+    let name = "";
+    let description = "";
+    const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
+    if (fmMatch) {
+      for (const line of fmMatch[1].split("\n")) {
+        const idx = line.indexOf(":");
+        if (idx <= 0) continue;
+        const key = line.slice(0, idx).trim().toLowerCase();
+        const val = line.slice(idx + 1).trim();
+        if (key === "name") name = val;
+        else if (key === "description") description = val;
+      }
+    }
+
+    // Fallback name from filename
+    if (!name) {
+      name = path.basename(req.file.originalname, path.extname(req.file.originalname));
+    }
+
+    // Save SKILL.md to skills/<name>/SKILL.md
+    const skillDir = path.join(process.cwd(), "skills", name.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase());
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, "SKILL.md"), content, "utf-8");
+
+    // Register in skills.json
+    const skills = getSkills();
+    const existing = skills.find((s) => s.name === name && s.source === "custom");
+    if (existing) {
+      existing.script = name;
+      existing.description = description || existing.description;
+      saveSkills(skills);
+      return res.json(existing);
+    }
+
+    const skill = {
+      id: uuid(),
+      name,
+      description: description || `Custom skill from ${req.file.originalname}`,
+      source: "custom" as const,
+      script: name,
+      enabled: true,
+      installedAt: new Date().toISOString(),
+    };
+    skills.push(skill);
+    saveSkills(skills);
+    res.json(skill);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Browse available skills (Claude / OpenClaw catalog)
