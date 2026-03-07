@@ -14,6 +14,23 @@ A self-hosted AI-powered workspace that combines chat, file management, code exe
 
 *Skills management page showing 13 installed skills from multiple sources — built-in (Claude), OpenClaw marketplace, and ClawHub community skills. Each skill can be enabled/disabled or uninstalled individually. Skills extend the AI's capabilities with specialized tools like web search, code review, data analysis, git operations, and more.*
 
+## Architecture
+
+![Tiger Cowork Agent Workflow](picture/tiger_cowork_workflow.png)
+
+The diagram above illustrates the **Tool Use & Reasoning Loop** at the core of Tiger Cowork's AI agent:
+
+1. **User Input** — The user sends a message through the chat interface.
+2. **Agent Reasoning** — The AI analyzes the query and plans which actions to take.
+3. **Need Tools?** — A decision point: if the query can be answered from knowledge alone, the agent returns a **Direct Response**. If tools are needed, it proceeds to tool selection.
+4. **Select Tool → Execute Tool** — The agent picks the appropriate tool (e.g. `web_search`, `run_python`, `fetch_url`, `run_react`) and executes it.
+5. **Observation** — The tool result is captured and fed back into the agent's context.
+6. **Update Context** — Memory and conversation context are updated with the new result.
+7. **Task Done?** — Another decision point: if the task requires more information, the agent loops back to select and execute additional tools (up to 8 rounds). Once complete, it generates the final response.
+8. **User Output** — The final answer, along with any generated files (charts, components, reports), is delivered to the user.
+
+The bottom section shows all **Available Tools** organized by category — web search, URL fetching, Python/React execution, shell commands, file operations, skill management, ClawHub marketplace, and external MCP tools.
+
 ## What's New in v0.1.2
 
 - **Context overflow fix** — Resolved "No response from API" errors after extended tool loops by truncating large tool call arguments and results, and building compact summaries for final responses
@@ -139,6 +156,41 @@ The app starts at **http://localhost:3001** with hot-reload via Vite.
 ```bash
 npm run build
 npm start
+```
+
+### 5. Running in background (production)
+
+**Option A — Using `nohup`** (simple, no extra dependencies):
+
+```bash
+npm run build
+nohup npm start > output.log 2>&1 &
+```
+
+- Logs are written to `output.log`
+- The server keeps running after you close the terminal
+- To stop: `kill $(lsof -t -i:3001)` or find the PID with `ps aux | grep tsx`
+
+**Option B — Using PM2** (recommended for production):
+
+```bash
+# Install PM2 globally
+npm install -g pm2
+
+# Build and start
+npm run build
+pm2 start npm --name "cowork" -- start
+
+# Useful PM2 commands
+pm2 status          # Check running processes
+pm2 logs cowork     # View logs
+pm2 restart cowork  # Restart the app
+pm2 stop cowork     # Stop the app
+pm2 delete cowork   # Remove from PM2
+
+# Auto-start on system reboot
+pm2 startup
+pm2 save
 ```
 
 ## Configuration
