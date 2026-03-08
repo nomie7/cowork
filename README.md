@@ -1,3 +1,5 @@
+![Tiger Cowork Banner](picture/tigerbanner.jpg)
+
 # Tiger Cowork v0.1.2
 
 > **⚠️ WARNING: This application executes AI-generated code, shell commands, and third-party skills on your machine. Please run it inside a sandboxed environment (e.g. Docker) to protect your host system. See [Security Notice](#security-notice) below.**
