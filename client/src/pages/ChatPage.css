@@ -243,7 +243,8 @@
   border: 1px solid var(--border-color, #333);
   padding: 6px 12px;
   text-align: left;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .message-content th {
@@ -1041,7 +1042,43 @@
   }
 
   .message-content {
-    font-size: 14px;
+    font-size: 13px;
+    line-height: 1.5;
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+
+  .message-content h1 { font-size: 1.15em; }
+  .message-content h2 { font-size: 1.05em; }
+  .message-content h3 { font-size: 1em; }
+
+  .message-content pre {
+    font-size: 11px;
+    overflow-x: auto;
+  }
+
+  .message-content code {
+    font-size: 11px;
+  }
+
+  .message-content table {
+    font-size: 11px;
+  }
+
+  .message-content th,
+  .message-content td {
+    padding: 4px 6px;
+    white-space: normal;
+  }
+
+  .message-content ul,
+  .message-content ol {
+    padding-left: 16px;
+  }
+
+  .message-content blockquote {
+    padding: 2px 8px;
+    font-size: 12px;
   }
 
   .chat-input-container {
@@ -1085,6 +1122,34 @@
 
   .doc-preview-content {
     max-height: 400px;
+  }
+
+  .doc-preview-body {
+    padding: 10px 12px;
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  .doc-preview-body h1 { font-size: 15px; }
+  .doc-preview-body h2 { font-size: 13px; }
+  .doc-preview-body h3 { font-size: 12px; }
+
+  .doc-preview-body table {
+    font-size: 10px;
+  }
+
+  .doc-preview-body table th,
+  .doc-preview-body table td {
+    padding: 3px 5px;
+  }
+
+  .canvas-react-body {
+    padding: 8px;
+    min-height: 150px;
+  }
+
+  .canvas-image {
+    max-height: 280px;
   }
 
   .attachment-item {
