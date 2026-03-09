@@ -337,6 +337,100 @@
   box-shadow: 0 0 0 2px var(--accent-light);
 }
 
+.memory-view {
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  min-height: 200px;
+  font-size: 14px;
+  line-height: 1.7;
+  overflow-y: auto;
+}
+
+.memory-view h1,
+.memory-view h2,
+.memory-view h3 {
+  margin-top: 16px;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+}
+
+.memory-view h1 { font-size: 20px; }
+.memory-view h2 { font-size: 17px; }
+.memory-view h3 { font-size: 15px; }
+
+.memory-view p {
+  margin: 6px 0;
+}
+
+.memory-view ul,
+.memory-view ol {
+  padding-left: 20px;
+  margin: 6px 0;
+}
+
+.memory-view li {
+  margin: 3px 0;
+}
+
+.memory-view code {
+  background: var(--bg-tertiary);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.memory-view pre {
+  background: var(--bg-tertiary);
+  padding: 12px;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.memory-view pre code {
+  background: none;
+  padding: 0;
+}
+
+.memory-view table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+}
+
+.memory-view th,
+.memory-view td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 13px;
+}
+
+.memory-view th {
+  background: var(--bg-tertiary);
+  font-weight: 600;
+}
+
+.memory-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px 16px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.memory-empty p {
+  margin: 0;
+  font-size: 14px;
+}
+
 /* ─── Skills tab ─── */
 
 .project-skills {

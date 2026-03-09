@@ -521,6 +521,7 @@ export default function ProjectsPage() {
   const [memoryContent, setMemoryContent] = useState("");
   const [memoryDirty, setMemoryDirty] = useState(false);
   const [memorySaving, setMemorySaving] = useState(false);
+  const [memoryEditing, setMemoryEditing] = useState(false);
   const [allSkills, setAllSkills] = useState<Skill[]>([]);
   const [projectFiles, setProjectFiles] = useState<FileEntry[]>([]);
   const [filePath, setFilePath] = useState("");
@@ -539,6 +540,7 @@ export default function ProjectsPage() {
     if (activeProject) {
       setMemoryContent(activeProject.memory || "");
       setMemoryDirty(false);
+      setMemoryEditing(false);
       setFilePath("");
       loadFiles(activeProject, "");
     }
@@ -582,6 +584,7 @@ export default function ProjectsPage() {
     setProjects((prev) => prev.map((p) => p.id === updated.id ? updated : p));
     setMemoryDirty(false);
     setMemorySaving(false);
+    setMemoryEditing(false);
   };
 
   const toggleSkill = async (skillId: string) => {
@@ -818,19 +821,44 @@ export default function ProjectsPage() {
                       <p className="hint">Record project characteristics, decisions, and notes. The agent reads this as context.</p>
                     </div>
                     <div className="memory-actions">
-                      {memoryDirty && (
-                        <button className="btn btn-primary btn-sm" onClick={saveMemory} disabled={memorySaving}>
-                          {memorySaving ? "Saving..." : "Save"}
+                      {memoryEditing ? (
+                        <>
+                          {memoryDirty && (
+                            <button className="btn btn-primary btn-sm" onClick={saveMemory} disabled={memorySaving}>
+                              {memorySaving ? "Saving..." : "Save"}
+                            </button>
+                          )}
+                          <button className="btn btn-ghost btn-sm" onClick={() => { setMemoryContent(activeProject.memory || ""); setMemoryDirty(false); setMemoryEditing(false); }}>
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button className="btn btn-ghost btn-sm" onClick={() => setMemoryEditing(true)}>
+                          Edit
                         </button>
                       )}
                     </div>
                   </div>
-                  <textarea
-                    className="memory-editor"
-                    value={memoryContent}
-                    onChange={(e) => { setMemoryContent(e.target.value); setMemoryDirty(true); }}
-                    placeholder={"# Project Memory\n\nRecord project info here...\n\n## Tech Stack\n- ...\n\n## Key Decisions\n- ...\n\n## Notes\n- ..."}
-                  />
+                  {memoryEditing ? (
+                    <textarea
+                      className="memory-editor"
+                      value={memoryContent}
+                      onChange={(e) => { setMemoryContent(e.target.value); setMemoryDirty(true); }}
+                      placeholder={"# Project Memory\n\nRecord project info here...\n\n## Tech Stack\n- ...\n\n## Key Decisions\n- ...\n\n## Notes\n- ..."}
+                      autoFocus
+                    />
+                  ) : (
+                    <div className="memory-view">
+                      {memoryContent ? (
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{memoryContent}</ReactMarkdown>
+                      ) : (
+                        <div className="memory-empty">
+                          <p>No memory recorded yet.</p>
+                          <button className="btn btn-primary btn-sm" onClick={() => setMemoryEditing(true)}>Add Memory</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
