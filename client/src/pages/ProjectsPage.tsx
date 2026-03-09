@@ -538,7 +538,12 @@ export default function ProjectsPage() {
 
   useEffect(() => {
     if (activeProject) {
-      setMemoryContent(activeProject.memory || "");
+      // Fetch memory from file (memory.md in working folder) via API
+      api.getProjectMemory(activeProject.id).then((data: any) => {
+        setMemoryContent(data.content || "");
+      }).catch(() => {
+        setMemoryContent(activeProject.memory || "");
+      });
       setMemoryDirty(false);
       setMemoryEditing(false);
       setFilePath("");

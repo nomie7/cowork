@@ -64,21 +64,55 @@ projectsRouter.delete("/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-// Get project memory
+// Get project memory — read from {workingFolder}/memory.md
 projectsRouter.get("/:id/memory", (req, res) => {
   const projects = getProjects();
   const project = projects.find((p) => p.id === req.params.id);
   if (!project) return res.status(404).json({ error: "Project not found" });
-  res.json({ content: project.memory || "" });
+
+  let content = "";
+  if (project.workingFolder) {
+    const memoryPath = path.join(project.workingFolder, "memory.md");
+    try {
+      if (fs.existsSync(memoryPath)) {
+        content = fs.readFileSync(memoryPath, "utf-8");
+      }
+    } catch (err: any) {
+      console.error(`Failed to read memory.md for project ${project.id}:`, err.message);
+    }
+  }
+  // Fallback to stored memory if no file found
+  if (!content && project.memory) {
+    content = project.memory;
+  }
+  res.json({ content });
 });
 
-// Save project memory
+// Save project memory — write to {workingFolder}/memory.md
 projectsRouter.put("/:id/memory", (req, res) => {
   const projects = getProjects();
   const idx = projects.findIndex((p) => p.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: "Project not found" });
 
-  projects[idx].memory = req.body.content || "";
+  const content = req.body.content || "";
+  const project = projects[idx];
+
+  // Write to memory.md in the working folder
+  if (project.workingFolder) {
+    const memoryPath = path.join(project.workingFolder, "memory.md");
+    try {
+      if (!fs.existsSync(project.workingFolder)) {
+        fs.mkdirSync(project.workingFolder, { recursive: true });
+      }
+      fs.writeFileSync(memoryPath, content, "utf-8");
+    } catch (err: any) {
+      console.error(`Failed to write memory.md for project ${project.id}:`, err.message);
+      return res.status(500).json({ error: `Failed to write memory.md: ${err.message}` });
+    }
+  }
+
+  // Also keep in project JSON as backup
+  projects[idx].memory = content;
   projects[idx].updatedAt = new Date().toISOString();
   saveProjects(projects);
   res.json({ ok: true });

@@ -258,9 +258,26 @@ img.save('${tmpOut}', 'JPEG', quality=80)
       // Build project-aware system prompt
       let projectPrompt = buildSystemPrompt();
 
+      // Read project memory fresh from {workingFolder}/memory.md every time
+      let projectMemory = "";
+      if (project.workingFolder) {
+        const memoryPath = path.join(project.workingFolder, "memory.md");
+        try {
+          if (fs.existsSync(memoryPath)) {
+            projectMemory = fs.readFileSync(memoryPath, "utf-8");
+          }
+        } catch (err: any) {
+          console.error(`Failed to read memory.md for project ${project.id}:`, err.message);
+        }
+      }
+      // Fallback to stored memory if no file found
+      if (!projectMemory && project.memory) {
+        projectMemory = project.memory;
+      }
+
       // Inject project memory
-      if (project.memory) {
-        projectPrompt += `\n\n--- PROJECT MEMORY (memory.md) ---\nThe user is working in project "${project.name}". Here is the project memory that records key information:\n\n${project.memory}\n--- END PROJECT MEMORY ---`;
+      if (projectMemory) {
+        projectPrompt += `\n\n--- PROJECT MEMORY (memory.md) ---\nThe user is working in project "${project.name}". Here is the project memory that records key information:\n\n${projectMemory}\n--- END PROJECT MEMORY ---`;
       }
 
       // Inject project description
