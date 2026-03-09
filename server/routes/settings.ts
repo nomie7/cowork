@@ -14,6 +14,9 @@ settingsRouter.get("/", (_req, res) => {
   if (masked.webSearchApiKey) {
     masked.webSearchApiKey = masked.webSearchApiKey.slice(0, 8) + "..." + masked.webSearchApiKey.slice(-4);
   }
+  if (masked.openRouterSearchApiKey) {
+    masked.openRouterSearchApiKey = masked.openRouterSearchApiKey.slice(0, 8) + "..." + masked.openRouterSearchApiKey.slice(-4);
+  }
   res.json(masked);
 });
 
@@ -26,6 +29,9 @@ settingsRouter.put("/", (req, res) => {
   }
   if (req.body.webSearchApiKey?.includes("...")) {
     updated.webSearchApiKey = current.webSearchApiKey;
+  }
+  if (req.body.openRouterSearchApiKey?.includes("...")) {
+    updated.openRouterSearchApiKey = current.openRouterSearchApiKey;
   }
   saveSettings(updated);
   res.json({ success: true });

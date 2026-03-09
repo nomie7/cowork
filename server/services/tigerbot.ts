@@ -81,8 +81,9 @@ export async function callTigerBotWithTools(
   }
   allMessages.push(...messages);
 
-  const maxToolRounds = 8;
-  const maxToolCalls = 12;
+  const settings = getSettings();
+  const maxToolRounds = settings.agentMaxToolRounds || 8;
+  const maxToolCalls = settings.agentMaxToolCalls || 12;
   const toolResults: Array<{ tool: string; result: any }> = [];
   const toolCallHistory: string[] = [];
   let totalToolCalls = 0;
@@ -227,7 +228,8 @@ export async function callTigerBotWithTools(
 
       // Truncate large tool results to prevent context overflow
       let resultStr = JSON.stringify(result);
-      const maxLen = fnName === "load_skill" ? 3000 : 6000;
+      const baseMaxLen = settings.agentToolResultMaxLen || 6000;
+      const maxLen = fnName === "load_skill" ? Math.min(3000, baseMaxLen) : baseMaxLen;
       if (resultStr.length > maxLen) {
         resultStr = resultStr.slice(0, maxLen) + "\n...(truncated)";
       }
@@ -238,8 +240,9 @@ export async function callTigerBotWithTools(
       });
 
       // Stop if too many consecutive errors (tool/command not available)
-      if (consecutiveErrors >= 3) {
-        console.log(`[ToolLoop] 3 consecutive errors. Breaking.`);
+      const maxConsecutiveErrors = settings.agentMaxConsecutiveErrors || 3;
+      if (consecutiveErrors >= maxConsecutiveErrors) {
+        console.log(`[ToolLoop] ${maxConsecutiveErrors} consecutive errors. Breaking.`);
         break;
       }
 
@@ -247,7 +250,7 @@ export async function callTigerBotWithTools(
       if (totalToolCalls >= maxToolCalls) break;
     }
 
-    if (totalToolCalls >= maxToolCalls || consecutiveErrors >= 3) break;
+    if (totalToolCalls >= maxToolCalls || consecutiveErrors >= (settings.agentMaxConsecutiveErrors || 3)) break;
   }
 
   console.log(`[ToolLoop] Ended after ${totalToolCalls} tool calls. Generating final response...`);

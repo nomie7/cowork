@@ -1,6 +1,6 @@
 ![Tiger Cowork Banner](picture/tigerbanner.jpg)
 
-# Tiger Cowork v0.1.3
+# Tiger Cowork v0.1.4
 
 > **⚠️ WARNING: This application executes AI-generated code, shell commands, and third-party skills on your machine. Please run it inside a sandboxed environment (e.g. Docker) to protect your host system. See [Security Notice](#security-notice) below.**
 
@@ -28,37 +28,43 @@ The diagram above illustrates the **Tool Use & Reasoning Loop** at the core of T
 4. **Select Tool → Execute Tool** — The agent picks the appropriate tool (e.g. `web_search`, `run_python`, `fetch_url`, `run_react`) and executes it.
 5. **Observation** — The tool result is captured and fed back into the agent's context.
 6. **Update Context** — Memory and conversation context are updated with the new result.
-7. **Task Done?** — Another decision point: if the task requires more information, the agent loops back to select and execute additional tools (up to 8 rounds). Once complete, it generates the final response.
+7. **Task Done?** — Another decision point: if the task requires more information, the agent loops back to select and execute additional tools (configurable, default 8 rounds / 12 calls). Once complete, it generates the final response.
 8. **User Output** — The final answer, along with any generated files (charts, components, reports), is delivered to the user.
 
 The bottom section shows all **Available Tools** organized by category — web search, URL fetching, Python/React execution, shell commands, file operations, skill management, ClawHub marketplace, and external MCP tools.
 
-## What's New in v0.1.3
+## What's New in v0.1.4
 
-- **Projects** — Organize work into dedicated projects, each with its own working folder, persistent memory, skill selection, and file browser. Project chat sessions inherit project context automatically so the AI understands your project from the start.
-- **Output panel in project chat** — Project conversations now render generated files (React/JSX components, images, HTML reports, PDFs, Word documents) in a right-side output panel, matching the main chat experience.
-- **Word/PDF document preview** — Output panel supports inline preview of generated DOCX and PDF files using mammoth and pdf-parse.
-- **Image attachments** — Attach images to chat messages with automatic compression for the vision API.
-- **Mobile formatting improvements** — Reduced font sizes and prevented table overflow on small screens.
+- **Working folder: Sandbox vs External** — Projects now let you choose where the working folder lives. **In Sandbox** creates a folder inside the sandbox directory with full access. **External Folder** lets you mount any local path (outside the sandbox) with configurable access levels.
+- **Agent access control** — External folders support three access levels: **Read Only** (agent can only read files), **Read & Write** (agent can read and write), and **Full Access** (agent can read, write, and execute shell commands). Sandbox folders always have full access.
+- **Docker volume mount generator** — The Overview tab includes a "Docker Volume Mounts" button that generates ready-to-copy `docker run` and `docker-compose` volume configurations for all external project folders, with correct `:ro`/`:rw` flags.
+- **Configurable agent parameters** — Settings page now has an "Agent Parameters" section to tune: Max Tool Rounds (default 8), Max Tool Calls (default 12), Max Consecutive Errors (default 3), and Tool Result Max Length (default 6000). Increase these for complex research tasks that were previously cut short.
+- **Server-side access enforcement** — `write_file` and `run_shell` tools respect the project's access level. Read-only projects block writes; only full-access projects allow shell commands.
 
 ## Features
 
 ### AI Chat with Tool Calling
 - Conversational AI assistant with automatic tool use
 - 12 built-in tools: web search, URL fetch, Python execution, React rendering, shell commands, file read/write/list, skill management, and ClawHub marketplace
-- Up to 8 tool rounds per conversation turn, max 12 tool calls total
+- Configurable tool loop limits: max tool rounds (default 8), max tool calls (default 12), consecutive error threshold, and result truncation length — all adjustable in Settings > Agent Parameters
 - Real-time streaming of responses and tool call progress via Socket.IO
 - Automatic output file generation for analysis/chart requests
 - File attachments with image vision support
 
 ### Projects
 - Create dedicated projects to organize related work in one place
-- **Working folder** — Assign a directory to each project; the AI can read and write files within it, and you can browse the contents from the Files tab
+- **Working folder** — Two location options:
+  - **In Sandbox** — Creates a folder inside the sandbox directory. Always has full access (read, write, execute). Best for AI-generated content.
+  - **External Folder** — Mount any local path outside the sandbox (e.g. `/home/user/research`). Choose an access level:
+    - **Read Only** — Agent can read files but cannot modify anything
+    - **Read & Write** — Agent can read and write files but cannot run shell commands
+    - **Full Access** — Agent can read, write, and execute shell commands
+- **Docker volume mounts** — For external folders, the Overview tab generates ready-to-copy `docker run` and `docker-compose` volume mount commands with correct `:ro`/`:rw` flags
 - **Project memory** — A persistent markdown notepad injected into every chat message as context. Record tech stack decisions, conventions, key file paths, or anything the AI should remember across sessions
 - **Skill selection** — Choose which installed skills are prioritized for each project so the AI reaches for the right tools
 - **Project chat** — Each project has its own chat interface with a session sidebar. Chat sessions are automatically prefixed with the project name and inherit the project's memory, working folder, and selected skills as context
 - **Output panel** — Generated files (React components, charts, HTML reports, PDFs, Word documents) render in a collapsible right-side panel within the project chat, just like the main chat
-- **Overview dashboard** — Quick glance at working folder, memory size, and selected skill count
+- **Overview dashboard** — Quick glance at working folder, location type, access level, memory size, and selected skill count
 
 ### Output Panel
 - Collapsible right-side panel that renders all generated files from chat
@@ -146,6 +152,33 @@ npm run dev
 ```
 
 This ensures that any code execution, shell commands, or skill scripts run in an isolated environment and cannot affect your host system.
+
+### Mounting External Folders in Docker
+
+To let projects access folders on your host machine, use Docker volume mounts:
+
+```bash
+# Mount a single folder (read-write)
+docker run -it -p 3001:3001 \
+  -v /home/user/research:/mnt/projects/research:rw \
+  ubuntu bash
+
+# Mount read-only
+docker run -it -p 3001:3001 \
+  -v /home/user/data:/mnt/projects/data:ro \
+  ubuntu bash
+
+# Mount multiple folders
+docker run -it -p 3001:3001 \
+  -v /home/user/project-a:/mnt/projects/a:rw \
+  -v /home/user/project-b:/mnt/projects/b:ro \
+  ubuntu bash
+```
+
+You can also generate these commands automatically from the app:
+1. Create projects with **External Folder** working folders
+2. Set the desired access level for each
+3. Go to **Overview** tab > **Docker Volume Mounts** to get the exact commands
 
 ## Prerequisites
 
@@ -334,12 +367,15 @@ ACCESS_TOKEN=mysecret PORT=8080 SANDBOX_DIR=/home/user/workspace npm run dev
 ### Projects
 
 1. Go to the **Projects** page in the sidebar
-2. Click **New Project** and give it a name, optional description, and working folder
-3. Use the **Chat** tab to talk to the AI with full project context
-4. Use the **Memory** tab to record project notes — the AI reads this as context in every message
-5. Use the **Skills** tab to select which skills are prioritized for this project
-6. Use the **Files** tab to browse the project's working folder
-7. The **Overview** tab shows a summary of folder, memory, and skills at a glance
+2. Click **New Project** and give it a name and optional description
+3. Choose a working folder location:
+   - **In Sandbox** — Enter a folder name (created inside the sandbox, full access)
+   - **External Folder** — Browse or enter a local path, then choose the access level (Read Only / Read & Write / Full Access)
+4. Use the **Chat** tab to talk to the AI with full project context
+5. Use the **Memory** tab to record project notes — the AI reads this as context in every message
+6. Use the **Skills** tab to select which skills are prioritized for this project
+7. Use the **Files** tab to browse the project's working folder
+8. The **Overview** tab shows folder location, access level, memory, skills, and a Docker volume mount generator for external folders
 
 ### File Manager
 
@@ -453,6 +489,7 @@ tiger_cowork/
 | PUT    | `/api/projects/:id/memory`         | Update project memory         |
 | GET    | `/api/projects/:id/files`          | List project working folder   |
 | GET    | `/api/projects/browse/folders`     | Browse filesystem folders     |
+| GET    | `/api/projects/docker/mounts`     | Generate Docker volume config |
 | GET    | `/api/files?path=`                 | List files in sandbox         |
 | GET    | `/api/files/preview?file=`         | Preview PDF/DOCX files        |
 | GET    | `/api/tasks`                       | List scheduled tasks          |
@@ -486,6 +523,13 @@ tiger_cowork/
 | `python:result`     | Server → Client  | Python execution result              |
 
 ## Changelog
+
+### v0.1.4 (2026-03-09)
+- Add working folder location choice: **In Sandbox** (full access) or **External Folder** (with configurable access level)
+- Add agent access control for external folders: Read Only, Read & Write, Full Access — enforced server-side on `write_file` and `run_shell` tools
+- Add Docker volume mount generator in project Overview tab — generates `docker run` and `docker-compose` volume configs
+- Add configurable Agent Parameters in Settings: max tool rounds, max tool calls, max consecutive errors, tool result max length
+- Sandbox folders auto-resolve relative names to `{sandboxDir}/name`
 
 ### v0.1.3 (2026-03-09)
 - Add Projects feature with dedicated working folder, persistent memory, skill selection, and file browser per project

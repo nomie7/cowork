@@ -118,6 +118,7 @@ export const api = {
   saveProjectMemory: (id: string, content: string) => request(`/projects/${id}/memory`, { method: "PUT", body: JSON.stringify({ content }) }),
   getProjectFiles: (id: string, path?: string) => request(`/projects/${id}/files?path=${encodeURIComponent(path || "")}`),
   browseFolders: (path?: string) => request(`/projects/browse/folders?path=${encodeURIComponent(path || "/")}`),
+  getDockerMounts: () => request("/projects/docker/mounts"),
 
   // Settings
   getSettings: () => request("/settings"),

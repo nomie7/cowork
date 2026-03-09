@@ -78,6 +78,8 @@ export interface Project {
   name: string;
   description: string;
   workingFolder: string;
+  folderLocation: "sandbox" | "external";  // inside sandbox or external local path
+  folderAccess: "readonly" | "readwrite" | "full";  // access level (for external folders)
   memory: string;
   skills: string[];
   createdAt: string;

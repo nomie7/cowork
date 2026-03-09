@@ -12,6 +12,8 @@ interface Project {
   name: string;
   description: string;
   workingFolder: string;
+  folderLocation: "sandbox" | "external";  // inside sandbox or external local path
+  folderAccess: "readonly" | "readwrite" | "full";
   memory: string;
   skills: string[];
   createdAt: string;
@@ -527,6 +529,9 @@ export default function ProjectsPage() {
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [newFolder, setNewFolder] = useState("");
+  const [newFolderLocation, setNewFolderLocation] = useState<"sandbox" | "external">("sandbox");
+  const [newFolderAccess, setNewFolderAccess] = useState<"readonly" | "readwrite" | "full">("readwrite");
+  const [sandboxDir, setSandboxDir] = useState("");
   const [showFolderPicker, setShowFolderPicker] = useState<"create" | "edit" | null>(null);
   const [memoryContent, setMemoryContent] = useState("");
   const [memoryDirty, setMemoryDirty] = useState(false);
@@ -539,11 +544,16 @@ export default function ProjectsPage() {
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [editFolder, setEditFolder] = useState("");
+  const [editFolderLocation, setEditFolderLocation] = useState<"sandbox" | "external">("sandbox");
+  const [editFolderAccess, setEditFolderAccess] = useState<"readonly" | "readwrite" | "full">("readwrite");
+  const [dockerInfo, setDockerInfo] = useState<any>(null);
+  const [showDocker, setShowDocker] = useState(false);
   const [mobileSidebar, setMobileSidebar] = useState(false);
 
   useEffect(() => {
     api.getProjects().then(setProjects);
     api.getSkills().then(setAllSkills);
+    api.getSettings().then((s: any) => setSandboxDir(s.sandboxDir || ""));
   }, []);
 
   useEffect(() => {
@@ -571,15 +581,18 @@ export default function ProjectsPage() {
 
   const createProject = async () => {
     if (!newName.trim()) return;
+    const loc = newFolderLocation;
     const project = await api.createProject({
       name: newName.trim(),
       description: newDesc.trim(),
       workingFolder: newFolder.trim(),
+      folderLocation: loc,
+      folderAccess: loc === "sandbox" ? "full" : newFolderAccess,
     });
     setProjects((prev) => [...prev, project]);
     setActiveProject(project);
     setCreating(false);
-    setNewName(""); setNewDesc(""); setNewFolder("");
+    setNewName(""); setNewDesc(""); setNewFolder(""); setNewFolderLocation("sandbox"); setNewFolderAccess("readwrite");
   };
 
   const deleteProject = async (id: string, e: React.MouseEvent) => {
@@ -613,10 +626,13 @@ export default function ProjectsPage() {
 
   const saveEdit = async () => {
     if (!activeProject) return;
+    const loc = editFolderLocation;
     const project = await api.updateProject(activeProject.id, {
       name: editName.trim() || activeProject.name,
       description: editDesc.trim(),
       workingFolder: editFolder.trim(),
+      folderLocation: loc,
+      folderAccess: loc === "sandbox" ? "full" : editFolderAccess,
     });
     setActiveProject(project);
     setProjects((prev) => prev.map((p) => p.id === project.id ? project : p));
@@ -628,7 +644,15 @@ export default function ProjectsPage() {
     setEditName(activeProject.name);
     setEditDesc(activeProject.description);
     setEditFolder(activeProject.workingFolder);
+    setEditFolderLocation(activeProject.folderLocation || "sandbox");
+    setEditFolderAccess(activeProject.folderAccess || "readwrite");
     setEditing(true);
+  };
+
+  const loadDockerInfo = async () => {
+    const data = await api.getDockerMounts();
+    setDockerInfo(data);
+    setShowDocker(true);
   };
 
   const navigateFile = (entry: FileEntry) => {
@@ -691,17 +715,60 @@ export default function ProjectsPage() {
               value={newDesc}
               onChange={(e) => setNewDesc(e.target.value)}
             />
-            <div className="folder-input-row">
-              <input
-                placeholder="Working folder (optional)"
-                value={newFolder}
-                onChange={(e) => setNewFolder(e.target.value)}
-                style={{ flex: 1 }}
-              />
-              <button className="btn btn-ghost btn-sm" onClick={() => setShowFolderPicker("create")} title="Browse">
-                <Icon name="folder" />
+            <div className="folder-location-toggle">
+              <button className={`location-btn ${newFolderLocation === "sandbox" ? "active" : ""}`} onClick={() => { setNewFolderLocation("sandbox"); setNewFolder(""); }}>
+                In Sandbox
+              </button>
+              <button className={`location-btn ${newFolderLocation === "external" ? "active" : ""}`} onClick={() => { setNewFolderLocation("external"); setNewFolder(""); }}>
+                External Folder
               </button>
             </div>
+            {newFolderLocation === "sandbox" ? (
+              <div>
+                <input
+                  placeholder="Folder name (optional, e.g. my-project)"
+                  value={newFolder}
+                  onChange={(e) => setNewFolder(e.target.value)}
+                />
+                {sandboxDir && <span className="hint" style={{ fontSize: 10 }}>Path: {sandboxDir}/{newFolder || "..."} — Full access</span>}
+              </div>
+            ) : (
+              <>
+                <div className="folder-input-row">
+                  <input
+                    placeholder="External folder path (e.g. /home/user/project)"
+                    value={newFolder}
+                    onChange={(e) => setNewFolder(e.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <button className="btn btn-ghost btn-sm" onClick={() => setShowFolderPicker("create")} title="Browse">
+                    <Icon name="folder" />
+                  </button>
+                </div>
+                {newFolder && (
+                  <div className="folder-access-row">
+                    <label className="hint" style={{ fontSize: 11, marginBottom: 4 }}>Agent Access Level</label>
+                    <div className="access-options">
+                      {(["readonly", "readwrite", "full"] as const).map((level) => (
+                        <button
+                          key={level}
+                          className={`access-btn ${newFolderAccess === level ? "active" : ""}`}
+                          onClick={() => setNewFolderAccess(level)}
+                        >
+                          <span className="access-icon">{level === "readonly" ? "👁" : level === "readwrite" ? "📝" : "⚡"}</span>
+                          <span className="access-label">{level === "readonly" ? "Read Only" : level === "readwrite" ? "Read & Write" : "Full Access"}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <span className="hint" style={{ fontSize: 10, marginTop: 2 }}>
+                      {newFolderAccess === "readonly" ? "Agent can only read files. Docker: read-only mount" :
+                       newFolderAccess === "readwrite" ? "Agent can read and write files. Docker: read-write mount" :
+                       "Agent can read, write, and execute commands. Docker: read-write mount"}
+                    </span>
+                  </div>
+                )}
+              </>
+            )}
             <div className="project-create-actions">
               <button className="btn btn-primary btn-sm" onClick={createProject} disabled={!newName.trim()}>Create</button>
               <button className="btn btn-ghost btn-sm" onClick={() => setCreating(false)}>Cancel</button>
@@ -768,14 +835,53 @@ export default function ProjectsPage() {
                 </div>
                 <div className="form-group">
                   <label>Working Folder</label>
-                  <div className="folder-input-row">
-                    <input value={editFolder} onChange={(e) => setEditFolder(e.target.value)} placeholder="/path/to/folder" style={{ flex: 1 }} />
-                    <button className="btn btn-ghost btn-sm" onClick={() => setShowFolderPicker("edit")} title="Browse">
-                      <Icon name="folder" />
+                  <div className="folder-location-toggle">
+                    <button className={`location-btn ${editFolderLocation === "sandbox" ? "active" : ""}`} type="button" onClick={() => { setEditFolderLocation("sandbox"); setEditFolder(""); }}>
+                      In Sandbox
+                    </button>
+                    <button className={`location-btn ${editFolderLocation === "external" ? "active" : ""}`} type="button" onClick={() => { setEditFolderLocation("external"); setEditFolder(""); }}>
+                      External Folder
                     </button>
                   </div>
-                  <span className="hint">Folder for project output and files the agent can use</span>
+                  {editFolderLocation === "sandbox" ? (
+                    <>
+                      <input value={editFolder} onChange={(e) => setEditFolder(e.target.value)} placeholder="Folder name (e.g. my-project)" />
+                      {sandboxDir && <span className="hint" style={{ fontSize: 10 }}>Path: {sandboxDir}/{editFolder || "..."} — Full access</span>}
+                    </>
+                  ) : (
+                    <>
+                      <div className="folder-input-row">
+                        <input value={editFolder} onChange={(e) => setEditFolder(e.target.value)} placeholder="/path/to/external/folder" style={{ flex: 1 }} />
+                        <button className="btn btn-ghost btn-sm" type="button" onClick={() => setShowFolderPicker("edit")} title="Browse">
+                          <Icon name="folder" />
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
+                {editFolderLocation === "external" && editFolder && (
+                  <div className="form-group">
+                    <label>Agent Access Level</label>
+                    <div className="access-options">
+                      {(["readonly", "readwrite", "full"] as const).map((level) => (
+                        <button
+                          key={level}
+                          className={`access-btn ${editFolderAccess === level ? "active" : ""}`}
+                          onClick={() => setEditFolderAccess(level)}
+                          type="button"
+                        >
+                          <span className="access-icon">{level === "readonly" ? "👁" : level === "readwrite" ? "📝" : "⚡"}</span>
+                          <span className="access-label">{level === "readonly" ? "Read Only" : level === "readwrite" ? "Read & Write" : "Full Access"}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <span className="hint">
+                      {editFolderAccess === "readonly" ? "Agent can only read files. Docker: read-only mount (ro)" :
+                       editFolderAccess === "readwrite" ? "Agent can read and write files. Docker: read-write mount (rw)" :
+                       "Agent can read, write, and execute commands. Docker: read-write mount (rw)"}
+                    </span>
+                  </div>
+                )}
                 <div className="form-actions">
                   <button className="btn btn-primary btn-sm" onClick={saveEdit}>Save</button>
                   <button className="btn btn-ghost btn-sm" onClick={() => setEditing(false)}>Cancel</button>
@@ -806,6 +912,19 @@ export default function ProjectsPage() {
                         <span>{activeProject.workingFolder || "Not set"}</span>
                       </div>
                     </div>
+                    {activeProject.workingFolder && (
+                      <div className="overview-card">
+                        <div className="overview-card-icon" style={{ fontSize: 20 }}>
+                          {(activeProject.folderLocation || "sandbox") === "sandbox" ? "📦" :
+                           activeProject.folderAccess === "readonly" ? "👁" : activeProject.folderAccess === "full" ? "⚡" : "📝"}
+                        </div>
+                        <div className="overview-card-info">
+                          <strong>{(activeProject.folderLocation || "sandbox") === "sandbox" ? "Sandbox" : "External"}</strong>
+                          <span>{(activeProject.folderLocation || "sandbox") === "sandbox" ? "Full access" :
+                            activeProject.folderAccess === "readonly" ? "Read Only" : activeProject.folderAccess === "full" ? "Full Access" : "Read & Write"}</span>
+                        </div>
+                      </div>
+                    )}
                     <div className="overview-card" onClick={() => setTab("memory")}>
                       <div className="overview-card-icon"><Icon name="chat" /></div>
                       <div className="overview-card-info">
@@ -825,6 +944,54 @@ export default function ProjectsPage() {
                     <span>Created: {new Date(activeProject.createdAt).toLocaleDateString()}</span>
                     <span>Updated: {new Date(activeProject.updatedAt).toLocaleDateString()}</span>
                   </div>
+                  <div style={{ marginTop: 16 }}>
+                    <button className="btn btn-secondary btn-sm" onClick={loadDockerInfo}>
+                      Docker Volume Mounts
+                    </button>
+                  </div>
+
+                  {showDocker && dockerInfo && (
+                    <div className="folder-picker-overlay" onClick={() => setShowDocker(false)}>
+                      <div className="folder-picker" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 700 }}>
+                        <div className="folder-picker-header">
+                          <h3>Docker Volume Mounts</h3>
+                          <button className="btn-icon btn-ghost" onClick={() => setShowDocker(false)}><Icon name="close" /></button>
+                        </div>
+                        <div style={{ padding: 16 }}>
+                          <p className="hint" style={{ marginBottom: 12 }}>
+                            Use these volume mounts to give Docker access to your project working folders.
+                          </p>
+                          {dockerInfo.mounts?.length > 0 ? (
+                            <>
+                              <div style={{ marginBottom: 16 }}>
+                                <strong style={{ fontSize: 13 }}>Project Mounts</strong>
+                                <div style={{ marginTop: 8 }}>
+                                  {dockerInfo.mounts.map((m: any) => (
+                                    <div key={m.projectId} style={{ padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+                                      <div><strong>{m.projectName}</strong> — <span style={{ color: m.access === "readonly" ? "#ea8600" : m.access === "full" ? "#34a853" : "var(--accent)" }}>
+                                        {m.access === "readonly" ? "Read Only" : m.access === "full" ? "Full Access" : "Read & Write"}
+                                      </span></div>
+                                      <div style={{ opacity: 0.7, fontFamily: "monospace", marginTop: 2 }}>{m.hostPath} → {m.containerPath}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                              <div style={{ marginBottom: 12 }}>
+                                <strong style={{ fontSize: 13 }}>Docker Run Command</strong>
+                                <pre style={{ background: "var(--bg-secondary)", padding: 12, borderRadius: 6, fontSize: 11, overflow: "auto", whiteSpace: "pre-wrap", marginTop: 6 }}>{dockerInfo.dockerRun}</pre>
+                              </div>
+                              <div>
+                                <strong style={{ fontSize: 13 }}>Docker Compose Volumes</strong>
+                                <pre style={{ background: "var(--bg-secondary)", padding: 12, borderRadius: 6, fontSize: 11, overflow: "auto", whiteSpace: "pre-wrap", marginTop: 6 }}>{"    volumes:\n" + dockerInfo.composeVolumes}</pre>
+                              </div>
+                            </>
+                          ) : (
+                            <p>No project working folders configured. Set a working folder in your projects to generate Docker mounts.</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

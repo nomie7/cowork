@@ -3,8 +3,46 @@ import path from "path";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { runPython } from "./python";
-import { getSettings } from "./data";
+import { getSettings, getProjects } from "./data";
 import { getMcpTools, callMcpTool, isMcpTool } from "./mcp";
+
+// Check if a path is inside a project's working folder and return its access level
+// Sandbox projects always have full access — only external folders have restrictions
+function getProjectAccessForPath(filePath: string): { inProject: boolean; access: "readonly" | "readwrite" | "full"; projectName?: string } {
+  const resolved = path.resolve(filePath);
+  const projects = getProjects();
+  for (const p of projects) {
+    if (!p.workingFolder) continue;
+    const projectDir = path.resolve(p.workingFolder);
+    if (resolved === projectDir || resolved.startsWith(projectDir + path.sep)) {
+      // Sandbox folders always get full access
+      if (p.folderLocation !== "external") {
+        return { inProject: true, access: "full", projectName: p.name };
+      }
+      return { inProject: true, access: p.folderAccess || "readwrite", projectName: p.name };
+    }
+  }
+  return { inProject: false, access: "readwrite" };
+}
+
+// Check if write is allowed for a path (respects project folderAccess)
+function assertWriteAccess(filePath: string): void {
+  const { inProject, access, projectName } = getProjectAccessForPath(filePath);
+  if (inProject && access === "readonly") {
+    throw new Error(`Write denied: project "${projectName}" working folder is set to read-only access`);
+  }
+}
+
+// Check if shell/exec is allowed for a path (only "full" access allows shell)
+function assertFullAccess(dirPath: string): void {
+  const { inProject, access, projectName } = getProjectAccessForPath(dirPath);
+  if (inProject && access === "readonly") {
+    throw new Error(`Shell access denied: project "${projectName}" working folder is set to read-only access`);
+  }
+  if (inProject && access === "readwrite") {
+    throw new Error(`Shell/exec access denied: project "${projectName}" working folder is set to read-write only (no exec). Change to "full" access in project settings.`);
+  }
+}
 
 const execAsync = promisify(exec);
 
@@ -187,9 +225,30 @@ const builtinTools = [
   },
 ];
 
-// Dynamic tools getter: built-in + MCP tools
+// OpenRouter Web Search tool (conditionally included)
+const openRouterSearchTool = {
+  type: "function" as const,
+  function: {
+    name: "openrouter_web_search",
+    description: "Search the web using OpenRouter's Responses API with the web search plugin. Returns AI-summarized results with source citations. Best for detailed, up-to-date answers from the web.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search query" },
+      },
+      required: ["query"],
+    },
+  },
+};
+
+// Dynamic tools getter: built-in + MCP tools + conditional OpenRouter search
 export function getTools() {
-  return [...builtinTools, ...getMcpTools()];
+  const settings = getSettings();
+  const tools = [...builtinTools];
+  if (settings.openRouterSearchEnabled && settings.openRouterSearchApiKey) {
+    tools.push(openRouterSearchTool);
+  }
+  return [...tools, ...getMcpTools()];
 }
 
 // Keep backward-compat export (static reference for imports that use `tools`)
@@ -393,6 +452,8 @@ async function runShell(args: { command?: string; cmd?: string; cwd?: string }):
   if (!command) return { ok: false, error: "No command provided" };
   const settings = getSettings();
   const cwd = args.cwd || settings.sandboxDir || process.cwd();
+  // Check project access - shell requires "full" access
+  try { assertFullAccess(cwd); } catch (err: any) { return { ok: false, error: err.message }; }
   try {
     const { stdout, stderr } = await execAsync(command, {
       cwd,
@@ -419,6 +480,8 @@ function writeFileTool(args: { path: string; content: string; append?: boolean }
   const sandboxDir = settings.sandboxDir || path.resolve("sandbox");
   const outputDir = path.join(sandboxDir, "output_file");
   const target = path.resolve(outputDir, args.path);
+  // Check project access before writing
+  assertWriteAccess(target);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   if (args.append) {
     fs.appendFileSync(target, args.content, "utf8");
@@ -582,11 +645,79 @@ async function clawhubInstallTool(args: { slug: string; force?: boolean }): Prom
   }
 }
 
+// --- OpenRouter Web Search ---
+
+async function openRouterWebSearch(args: { query: string }): Promise<any> {
+  const settings = getSettings();
+  const apiKey = settings.openRouterSearchApiKey;
+  if (!apiKey) return { ok: false, error: "OpenRouter API key not configured" };
+
+  const model = settings.openRouterSearchModel || "openai/gpt-4.1-mini";
+  const maxTokens = settings.openRouterSearchMaxTokens || 4096;
+  const maxResults = Math.min(10, Math.max(1, settings.openRouterSearchMaxResults || 5));
+
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        input: args.query,
+        max_output_tokens: maxTokens,
+        tools: [{ type: "web_search_preview", search_context_size: "medium" }],
+        plugins: [{ id: "web", max_results: maxResults }],
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return { ok: false, error: `OpenRouter API error ${response.status}: ${errText}` };
+    }
+
+    const data = await response.json();
+
+    // Extract text and citations from response
+    const output = data.output || [];
+    let text = "";
+    const citations: Array<{ url: string; title?: string }> = [];
+
+    for (const item of output) {
+      if (item.type === "message" && item.content) {
+        for (const block of item.content) {
+          if (block.type === "output_text") {
+            text += block.text || "";
+            // Collect annotations/citations
+            for (const ann of (block.annotations || [])) {
+              if (ann.type === "url_citation" && ann.url) {
+                citations.push({ url: ann.url, title: ann.title });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      text: text.slice(0, 15000),
+      citations: citations.slice(0, 20),
+      model,
+      usage: data.usage,
+    };
+  } catch (err: any) {
+    return { ok: false, error: err.message };
+  }
+}
+
 // --- Dispatcher ---
 
 export async function callTool(name: string, args: any): Promise<any> {
   switch (name) {
     case "web_search": return webSearch(args);
+    case "openrouter_web_search": return openRouterWebSearch(args);
     case "fetch_url": return fetchUrl(args);
     case "run_python": return runPythonTool(args);
     case "run_react": return runReactTool(args);

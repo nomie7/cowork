@@ -171,6 +171,67 @@ export default function SettingsPage() {
         </section>
 
         <section className="card">
+          <h3>OpenRouter Web Search</h3>
+          <p className="hint" style={{ marginBottom: 12 }}>
+            Use OpenRouter's Responses API as a web search tool for the agent. Requires an OpenRouter API key.
+          </p>
+          <div className="form-group">
+            <label className="toggle-label">
+              <input type="checkbox" checked={settings.openRouterSearchEnabled || false} onChange={(e) => setSettings({ ...settings, openRouterSearchEnabled: e.target.checked })} />
+              <span>Enable OpenRouter Web Search</span>
+            </label>
+          </div>
+          {settings.openRouterSearchEnabled && (
+            <>
+              <div className="form-group">
+                <label>API Key</label>
+                <input type="password" value={settings.openRouterSearchApiKey || ""} onChange={(e) => setSettings({ ...settings, openRouterSearchApiKey: e.target.value })} placeholder="sk-or-v1-..." />
+              </div>
+              <div className="form-group">
+                <label>Model</label>
+                <input value={settings.openRouterSearchModel || ""} onChange={(e) => setSettings({ ...settings, openRouterSearchModel: e.target.value })} placeholder="openai/gpt-4.1-mini (default)" />
+                <p className="hint">OpenRouter model to use for web search. Must support the web search plugin.</p>
+              </div>
+              <div className="form-group">
+                <label>Max Output Tokens</label>
+                <input type="number" value={settings.openRouterSearchMaxTokens || 4096} onChange={(e) => setSettings({ ...settings, openRouterSearchMaxTokens: parseInt(e.target.value) || 4096 })} min={100} max={32000} />
+              </div>
+              <div className="form-group">
+                <label>Max Search Results (1-10)</label>
+                <input type="number" value={settings.openRouterSearchMaxResults || 5} onChange={(e) => setSettings({ ...settings, openRouterSearchMaxResults: Math.min(10, Math.max(1, parseInt(e.target.value) || 5)) })} min={1} max={10} />
+              </div>
+            </>
+          )}
+        </section>
+
+        <section className="card">
+          <h3>Agent Parameters</h3>
+          <p className="hint" style={{ marginBottom: 12 }}>
+            Controls how many tool calls and rounds the AI agent can use per conversation turn. Increase for complex research tasks.
+          </p>
+          <div className="form-group">
+            <label>Max Tool Rounds</label>
+            <input type="number" value={settings.agentMaxToolRounds || 8} onChange={(e) => setSettings({ ...settings, agentMaxToolRounds: Math.max(1, parseInt(e.target.value) || 8) })} min={1} max={50} />
+            <p className="hint">Maximum iterations of the tool-calling loop (default: 8)</p>
+          </div>
+          <div className="form-group">
+            <label>Max Tool Calls</label>
+            <input type="number" value={settings.agentMaxToolCalls || 12} onChange={(e) => setSettings({ ...settings, agentMaxToolCalls: Math.max(1, parseInt(e.target.value) || 12) })} min={1} max={100} />
+            <p className="hint">Maximum total tool calls per turn (default: 12)</p>
+          </div>
+          <div className="form-group">
+            <label>Max Consecutive Errors</label>
+            <input type="number" value={settings.agentMaxConsecutiveErrors || 3} onChange={(e) => setSettings({ ...settings, agentMaxConsecutiveErrors: Math.max(1, parseInt(e.target.value) || 3) })} min={1} max={20} />
+            <p className="hint">Stop after this many consecutive tool failures (default: 3)</p>
+          </div>
+          <div className="form-group">
+            <label>Tool Result Max Length</label>
+            <input type="number" value={settings.agentToolResultMaxLen || 6000} onChange={(e) => setSettings({ ...settings, agentToolResultMaxLen: Math.max(1000, parseInt(e.target.value) || 6000) })} min={1000} max={50000} step={1000} />
+            <p className="hint">Max characters per tool result before truncation (default: 6000)</p>
+          </div>
+        </section>
+
+        <section className="card">
           <h3>MCP Servers</h3>
           <p className="hint" style={{ marginBottom: 12 }}>
             Connect external tools via Model Context Protocol (MCP). Supports HTTP/SSE URLs or stdio commands.

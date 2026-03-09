@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getProjects, saveProjects, Project } from "../services/data";
+import { getProjects, saveProjects, getSettings, Project } from "../services/data";
 import { v4 as uuid } from "uuid";
 import fs from "fs";
 import path from "path";
@@ -9,6 +9,35 @@ export const projectsRouter = Router();
 // List all projects
 projectsRouter.get("/", (_req, res) => {
   res.json(getProjects());
+});
+
+// Generate Docker volume mount configuration for external project folders
+projectsRouter.get("/docker/mounts", (_req, res) => {
+  const projects = getProjects();
+  const mounts = projects
+    .filter((p) => p.workingFolder && p.folderLocation === "external")
+    .map((p) => {
+      const containerPath = `/mnt/projects/${p.id}`;
+      const accessFlag = p.folderAccess === "readonly" ? "ro" : "rw";
+      return {
+        projectId: p.id,
+        projectName: p.name,
+        hostPath: p.workingFolder,
+        containerPath,
+        access: p.folderAccess || "readwrite",
+        volumeFlag: `${p.workingFolder}:${containerPath}:${accessFlag}`,
+      };
+    });
+
+  const volumeArgs = mounts.map((m) => `-v ${m.volumeFlag}`).join(" \\\n  ");
+  const dockerRun = `docker run -p 3001:3001 \\\n  ${volumeArgs} \\\n  cowork`;
+
+  const composeVolumes = mounts.map((m) => {
+    const mode = m.access === "readonly" ? "ro" : "rw";
+    return `      - ${m.hostPath}:${m.containerPath}:${mode}`;
+  }).join("\n");
+
+  res.json({ mounts, dockerRun, composeVolumes });
 });
 
 // Get single project
@@ -21,13 +50,25 @@ projectsRouter.get("/:id", (req, res) => {
 
 // Create project
 projectsRouter.post("/", (req, res) => {
-  const { name, description, workingFolder, skills } = req.body;
+  const { name, description, workingFolder, folderLocation, folderAccess, skills } = req.body;
   const projects = getProjects();
+  const settings = getSettings();
+
+  // Resolve working folder path based on location
+  let resolvedFolder = workingFolder || "";
+  const loc = folderLocation || "sandbox";
+  if (loc === "sandbox" && resolvedFolder && !path.isAbsolute(resolvedFolder)) {
+    const sandboxDir = settings.sandboxDir || path.resolve("sandbox");
+    resolvedFolder = path.join(sandboxDir, resolvedFolder);
+  }
+
   const project: Project = {
     id: uuid(),
     name: name || "Untitled Project",
     description: description || "",
-    workingFolder: workingFolder || "",
+    workingFolder: resolvedFolder,
+    folderLocation: loc,
+    folderAccess: loc === "sandbox" ? "full" : (folderAccess || "readwrite"),
     memory: "",
     skills: skills || [],
     createdAt: new Date().toISOString(),

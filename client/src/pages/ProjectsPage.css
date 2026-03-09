@@ -956,4 +956,91 @@
   .folder-picker {
     width: 95vw;
   }
+
+  .access-options {
+    flex-direction: column;
+  }
+}
+
+/* ─── Folder Location Toggle ─── */
+
+.folder-location-toggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.location-btn {
+  flex: 1;
+  padding: 6px 8px;
+  border: none;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+
+.location-btn:first-child {
+  border-right: 1px solid var(--border);
+}
+
+.location-btn:hover {
+  background: var(--bg-secondary);
+}
+
+.location-btn.active {
+  background: var(--accent);
+  color: white;
+}
+
+/* ─── Folder Access Options ─── */
+
+.folder-access-row {
+  margin-top: 4px;
+}
+
+.access-options {
+  display: flex;
+  gap: 6px;
+}
+
+.access-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s;
+  flex: 1;
+  justify-content: center;
+}
+
+.access-btn:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.access-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-bg, rgba(59, 130, 246, 0.1));
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.access-icon {
+  font-size: 14px;
+}
+
+.access-label {
+  font-size: 11px;
 }
