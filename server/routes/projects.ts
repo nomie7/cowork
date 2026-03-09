@@ -1,0 +1,139 @@
+import { Router } from "express";
+import { getProjects, saveProjects, Project } from "../services/data";
+import { v4 as uuid } from "uuid";
+import fs from "fs";
+import path from "path";
+
+export const projectsRouter = Router();
+
+// List all projects
+projectsRouter.get("/", (_req, res) => {
+  res.json(getProjects());
+});
+
+// Get single project
+projectsRouter.get("/:id", (req, res) => {
+  const projects = getProjects();
+  const project = projects.find((p) => p.id === req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  res.json(project);
+});
+
+// Create project
+projectsRouter.post("/", (req, res) => {
+  const { name, description, workingFolder, skills } = req.body;
+  const projects = getProjects();
+  const project: Project = {
+    id: uuid(),
+    name: name || "Untitled Project",
+    description: description || "",
+    workingFolder: workingFolder || "",
+    memory: "",
+    skills: skills || [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  projects.push(project);
+  saveProjects(projects);
+
+  // Create working folder if specified and doesn't exist
+  if (project.workingFolder && !fs.existsSync(project.workingFolder)) {
+    fs.mkdirSync(project.workingFolder, { recursive: true });
+  }
+
+  res.json(project);
+});
+
+// Update project
+projectsRouter.patch("/:id", (req, res) => {
+  const projects = getProjects();
+  const idx = projects.findIndex((p) => p.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "Project not found" });
+
+  const updates = req.body;
+  projects[idx] = { ...projects[idx], ...updates, updatedAt: new Date().toISOString() };
+  saveProjects(projects);
+  res.json(projects[idx]);
+});
+
+// Delete project
+projectsRouter.delete("/:id", (req, res) => {
+  let projects = getProjects();
+  projects = projects.filter((p) => p.id !== req.params.id);
+  saveProjects(projects);
+  res.json({ ok: true });
+});
+
+// Get project memory
+projectsRouter.get("/:id/memory", (req, res) => {
+  const projects = getProjects();
+  const project = projects.find((p) => p.id === req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  res.json({ content: project.memory || "" });
+});
+
+// Save project memory
+projectsRouter.put("/:id/memory", (req, res) => {
+  const projects = getProjects();
+  const idx = projects.findIndex((p) => p.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "Project not found" });
+
+  projects[idx].memory = req.body.content || "";
+  projects[idx].updatedAt = new Date().toISOString();
+  saveProjects(projects);
+  res.json({ ok: true });
+});
+
+// Browse filesystem for folder picker (absolute paths)
+projectsRouter.get("/browse/folders", (_req, res) => {
+  const browsePath = (_req.query.path as string) || "/";
+  try {
+    if (!fs.existsSync(browsePath)) return res.json({ folders: [], current: browsePath });
+    const stat = fs.statSync(browsePath);
+    if (!stat.isDirectory()) return res.json({ folders: [], current: browsePath });
+
+    const entries = fs.readdirSync(browsePath, { withFileTypes: true });
+    const folders = entries
+      .filter((e) => {
+        if (!e.isDirectory()) return false;
+        // Skip hidden/system dirs
+        if (e.name.startsWith(".") || e.name === "node_modules" || e.name === "__pycache__") return false;
+        return true;
+      })
+      .map((e) => ({
+        name: e.name,
+        path: path.join(browsePath, e.name),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    res.json({ folders, current: browsePath, parent: path.dirname(browsePath) });
+  } catch (err: any) {
+    res.json({ folders: [], current: browsePath, error: err.message });
+  }
+});
+
+// List files in project working folder
+projectsRouter.get("/:id/files", (req, res) => {
+  const projects = getProjects();
+  const project = projects.find((p) => p.id === req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  if (!project.workingFolder) return res.json({ files: [] });
+
+  const subPath = (req.query.path as string) || "";
+  const fullPath = path.join(project.workingFolder, subPath);
+
+  if (!fs.existsSync(fullPath)) return res.json({ files: [] });
+
+  try {
+    const entries = fs.readdirSync(fullPath, { withFileTypes: true });
+    const files = entries.map((e) => ({
+      name: e.name,
+      isDirectory: e.isDirectory(),
+      size: e.isDirectory() ? 0 : fs.statSync(path.join(fullPath, e.name)).size,
+      path: subPath ? `${subPath}/${e.name}` : e.name,
+    }));
+    res.json({ files });
+  } catch (err: any) {
+    res.json({ files: [], error: err.message });
+  }
+});

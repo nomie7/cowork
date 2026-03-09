@@ -1,20 +1,20 @@
 ![Tiger Cowork Banner](picture/tigerbanner.jpg)
 
-# Tiger Cowork v0.1.2
+# Tiger Cowork v0.1.3
 
 > **⚠️ WARNING: This application executes AI-generated code, shell commands, and third-party skills on your machine. Please run it inside a sandboxed environment (e.g. Docker) to protect your host system. See [Security Notice](#security-notice) below.**
 
-A self-hosted AI-powered workspace that combines chat, file management, code execution, scheduled tasks, and a skill marketplace — all in one web interface. Compatible with any **OpenAI-compatible API** (OpenRouter, TigerBot, Ollama, etc.) with tool-calling capabilities.
+A self-hosted AI-powered workspace that combines chat, project management, file management, code execution, scheduled tasks, and a skill marketplace — all in one web interface. Compatible with any **OpenAI-compatible API** (OpenRouter, TigerBot, Ollama, etc.) with tool-calling capabilities.
 
-## Screenshot
+## Screenshots
 
-![Tiger Cowork — AI chat with React chart outputs](picture/screenshot1.png)
+![Tiger Cowork — AI chat with output panel](picture/screen3.png)
 
 *AI Chat interface with tool-calling support. The AI reads data files, generates interactive React/Recharts visualizations, and renders them natively in the output panel.*
 
 ![Tiger Cowork — Skills management page](picture/screen_shot2.png)
 
-*Skills management page showing 13 installed skills from multiple sources — built-in (Claude), OpenClaw marketplace, and ClawHub community skills. Each skill can be enabled/disabled or uninstalled individually. Skills extend the AI's capabilities with specialized tools like web search, code review, data analysis, git operations, and more.*
+*Skills management page showing installed skills from multiple sources — built-in, OpenClaw marketplace, and ClawHub community skills. Each skill can be enabled/disabled or uninstalled individually.*
 
 ## Architecture
 
@@ -33,14 +33,13 @@ The diagram above illustrates the **Tool Use & Reasoning Loop** at the core of T
 
 The bottom section shows all **Available Tools** organized by category — web search, URL fetching, Python/React execution, shell commands, file operations, skill management, ClawHub marketplace, and external MCP tools.
 
-## What's New in v0.1.2
+## What's New in v0.1.3
 
-- **Context overflow fix** — Resolved "No response from API" errors after extended tool loops by truncating large tool call arguments and results, and building compact summaries for final responses
-- **Improved tool loop reliability** — Added loop detection (same tool+args 3 rounds in a row), consecutive error tracking (stops after 3 failures), and automatic retry for chart/analysis generation
-- **Better chart generation** — When the AI detects chart/graph/analysis requests but no output files were produced, it automatically nudges the LLM to generate them with error-aware retry
-- **React component renderer** — New `ReactComponentRenderer` component for native in-browser rendering of AI-generated React/JSX components with Recharts support
-- **MCP (Model Context Protocol) integration** — Connect external tool servers via Stdio, SSE, or StreamableHTTP transports; tools are auto-discovered and available to the AI
-- **Robust JSON argument parsing** — Fallback parser recovers `run_python` and `run_react` code from malformed JSON tool call arguments
+- **Projects** — Organize work into dedicated projects, each with its own working folder, persistent memory, skill selection, and file browser. Project chat sessions inherit project context automatically so the AI understands your project from the start.
+- **Output panel in project chat** — Project conversations now render generated files (React/JSX components, images, HTML reports, PDFs, Word documents) in a right-side output panel, matching the main chat experience.
+- **Word/PDF document preview** — Output panel supports inline preview of generated DOCX and PDF files using mammoth and pdf-parse.
+- **Image attachments** — Attach images to chat messages with automatic compression for the vision API.
+- **Mobile formatting improvements** — Reduced font sizes and prevented table overflow on small screens.
 
 ## Features
 
@@ -50,6 +49,26 @@ The bottom section shows all **Available Tools** organized by category — web s
 - Up to 8 tool rounds per conversation turn, max 12 tool calls total
 - Real-time streaming of responses and tool call progress via Socket.IO
 - Automatic output file generation for analysis/chart requests
+- File attachments with image vision support
+
+### Projects
+- Create dedicated projects to organize related work in one place
+- **Working folder** — Assign a directory to each project; the AI can read and write files within it, and you can browse the contents from the Files tab
+- **Project memory** — A persistent markdown notepad injected into every chat message as context. Record tech stack decisions, conventions, key file paths, or anything the AI should remember across sessions
+- **Skill selection** — Choose which installed skills are prioritized for each project so the AI reaches for the right tools
+- **Project chat** — Each project has its own chat interface with a session sidebar. Chat sessions are automatically prefixed with the project name and inherit the project's memory, working folder, and selected skills as context
+- **Output panel** — Generated files (React components, charts, HTML reports, PDFs, Word documents) render in a collapsible right-side panel within the project chat, just like the main chat
+- **Overview dashboard** — Quick glance at working folder, memory size, and selected skill count
+
+### Output Panel
+- Collapsible right-side panel that renders all generated files from chat
+- **React/JSX** — AI-generated React components compiled server-side and rendered natively in the browser with Recharts support
+- **Images** — PNG, JPG, GIF, WebP, SVG, BMP with click-to-expand preview
+- **HTML reports** — Rendered in sandboxed iframes
+- **PDF files** — Inline preview with extracted text and page count
+- **Word documents** — DOCX/DOC preview with converted HTML content
+- **Other files** — Download chips for any other format
+- Toggle button with file count badge when the panel is closed
 
 ### Python Execution
 - Run Python code directly from chat or the dedicated Python runner
@@ -312,6 +331,16 @@ ACCESS_TOKEN=mysecret PORT=8080 SANDBOX_DIR=/home/user/workspace npm run dev
 4. Tool calls and results appear in real-time
 5. Generated files (charts, reports, HTML, React components) render in the output panel
 
+### Projects
+
+1. Go to the **Projects** page in the sidebar
+2. Click **New Project** and give it a name, optional description, and working folder
+3. Use the **Chat** tab to talk to the AI with full project context
+4. Use the **Memory** tab to record project notes — the AI reads this as context in every message
+5. Use the **Skills** tab to select which skills are prioritized for this project
+6. Use the **Files** tab to browse the project's working folder
+7. The **Overview** tab shows a summary of folder, memory, and skills at a glance
+
 ### File Manager
 
 1. Go to the **Files** page
@@ -341,7 +370,8 @@ tiger_cowork/
 │   ├── index.ts                    # Express + Socket.IO + Vite dev server entry
 │   ├── routes/
 │   │   ├── chat.ts                 # Chat session CRUD + message API
-│   │   ├── files.ts                # File manager (list, read, write, delete)
+│   │   ├── files.ts                # File manager (list, read, write, delete, preview)
+│   │   ├── projects.ts             # Project CRUD, memory, folder browse, project files
 │   │   ├── tasks.ts                # Scheduled tasks CRUD
 │   │   ├── skills.ts               # Skills catalog and management
 │   │   ├── settings.ts             # App settings API
@@ -352,7 +382,7 @@ tiger_cowork/
 │       ├── tigerbot.ts             # LLM API client (chat, streaming, tool loop)
 │       ├── toolbox.ts              # 12 built-in tool definitions + dispatcher
 │       ├── mcp.ts                  # MCP client (connect, discover, call tools)
-│       ├── socket.ts               # Real-time Socket.IO event handlers
+│       ├── socket.ts               # Real-time Socket.IO event handlers (chat + project chat)
 │       ├── scheduler.ts            # Cron job scheduler (node-cron)
 │       ├── data.ts                 # JSON file-based data persistence
 │       ├── python.ts               # Python subprocess runner
@@ -362,8 +392,9 @@ tiger_cowork/
 │   ├── src/
 │   │   ├── App.tsx                 # React Router setup
 │   │   ├── main.tsx                # App entry point
-│   │   ├── pages/                  # Chat, Files, Tasks, Skills, Settings pages
-│   │   │   └── ChatPage.tsx        # Main chat interface with output panel
+│   │   ├── pages/
+│   │   │   ├── ChatPage.tsx        # Main chat interface with output panel
+│   │   │   └── ProjectsPage.tsx    # Project management with chat, memory, skills, files
 │   │   ├── components/
 │   │   │   ├── AuthGate.tsx        # Access token login gate
 │   │   │   ├── Layout.tsx          # App layout with sidebar navigation
@@ -375,6 +406,7 @@ tiger_cowork/
 ├── data/                           # Auto-created JSON data storage
 │   ├── settings.json               # API keys, model, MCP config
 │   ├── chat_history.json           # Chat sessions and messages
+│   ├── projects.json               # Project definitions and memory
 │   ├── tasks.json                  # Scheduled task definitions
 │   └── skills.json                 # Installed skills registry
 ├── output_file/                    # Generated output files (charts, reports)
@@ -412,7 +444,17 @@ tiger_cowork/
 | DELETE | `/api/chat/sessions/:id`           | Delete a chat session         |
 | PATCH  | `/api/chat/sessions/:id`           | Rename a chat session         |
 | POST   | `/api/chat/sessions/:id/messages`  | Send a message                |
+| GET    | `/api/projects`                    | List all projects             |
+| POST   | `/api/projects`                    | Create a new project          |
+| GET    | `/api/projects/:id`                | Get a project                 |
+| PATCH  | `/api/projects/:id`                | Update a project              |
+| DELETE | `/api/projects/:id`                | Delete a project              |
+| GET    | `/api/projects/:id/memory`         | Get project memory            |
+| PUT    | `/api/projects/:id/memory`         | Update project memory         |
+| GET    | `/api/projects/:id/files`          | List project working folder   |
+| GET    | `/api/projects/browse/folders`     | Browse filesystem folders     |
 | GET    | `/api/files?path=`                 | List files in sandbox         |
+| GET    | `/api/files/preview?file=`         | Preview PDF/DOCX files        |
 | GET    | `/api/tasks`                       | List scheduled tasks          |
 | POST   | `/api/tasks`                       | Create a scheduled task       |
 | PATCH  | `/api/tasks/:id`                   | Update/toggle a task          |
@@ -432,17 +474,26 @@ tiger_cowork/
 
 ## Socket.IO Events
 
-| Event             | Direction        | Description                          |
-|-------------------|------------------|--------------------------------------|
-| `chat:send`       | Client → Server  | Send a chat message                  |
-| `chat:chunk`      | Server → Client  | Streamed AI response chunk           |
-| `chat:status`     | Server → Client  | Status update (thinking, tool call)  |
-| `chat:response`   | Server → Client  | Final complete response              |
-| `python:run`      | Client → Server  | Execute Python code                  |
-| `python:status`   | Server → Client  | Python execution status              |
-| `python:result`   | Server → Client  | Python execution result              |
+| Event               | Direction        | Description                          |
+|---------------------|------------------|--------------------------------------|
+| `chat:send`         | Client → Server  | Send a chat message                  |
+| `project:chat:send` | Client → Server  | Send a project chat message          |
+| `chat:chunk`        | Server → Client  | Streamed AI response chunk           |
+| `chat:status`       | Server → Client  | Status update (thinking, tool call)  |
+| `chat:response`     | Server → Client  | Final complete response with files   |
+| `python:run`        | Client → Server  | Execute Python code                  |
+| `python:status`     | Server → Client  | Python execution status              |
+| `python:result`     | Server → Client  | Python execution result              |
 
 ## Changelog
+
+### v0.1.3 (2026-03-09)
+- Add Projects feature with dedicated working folder, persistent memory, skill selection, and file browser per project
+- Add output panel to project chat (React/JSX, images, HTML, PDF, Word document rendering)
+- Add Word/PDF document preview in output panel using mammoth and pdf-parse
+- Add image attachment support with automatic compression for vision API
+- Fix mobile formatting: reduce font sizes and prevent table overflow
+- Fix outputFiles propagation through error handlers in socket service
 
 ### v0.1.2 (2026-03-08)
 - Add access token authentication to protect the app (`.env` based, optional)

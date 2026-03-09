@@ -22,6 +22,10 @@ export function useSocket() {
     socketRef.current?.emit("chat:send", { sessionId, message, images });
   }, []);
 
+  const sendProjectMessage = useCallback((projectId: string, sessionId: string, message: string, images?: { path: string; type: string }[]) => {
+    socketRef.current?.emit("project:chat:send", { projectId, sessionId, message, images });
+  }, []);
+
   const onChunk = useCallback((cb: (data: { sessionId: string; content: string }) => void) => {
     socketRef.current?.on("chat:chunk", cb);
     return () => { socketRef.current?.off("chat:chunk", cb); };
@@ -37,5 +41,5 @@ export function useSocket() {
     return () => { socketRef.current?.off("chat:status", cb); };
   }, []);
 
-  return { connected, sendMessage, onChunk, onResponse, onStatus, socket: socketRef };
+  return { connected, sendMessage, sendProjectMessage, onChunk, onResponse, onStatus, socket: socketRef };
 }

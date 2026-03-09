@@ -14,6 +14,7 @@ import { settingsRouter } from "./routes/settings";
 import { pythonRouter } from "./routes/python";
 import { toolsRouter } from "./routes/tools";
 import { clawhubRouter } from "./routes/clawhub";
+import { projectsRouter } from "./routes/projects";
 import { setupSocket } from "./services/socket";
 import { initMcpServers } from "./services/mcp";
 
@@ -37,7 +38,7 @@ const DATA_DIR = path.resolve("data");
 });
 
 // Initialize data files
-const dataFiles = ["chat_history.json", "tasks.json", "settings.json", "skills.json"];
+const dataFiles = ["chat_history.json", "tasks.json", "settings.json", "skills.json", "projects.json"];
 dataFiles.forEach((file) => {
   const fp = path.join(DATA_DIR, file);
   if (!fs.existsSync(fp)) {
@@ -85,6 +86,7 @@ app.use("/api/settings", settingsRouter);
 app.use("/api/python", pythonRouter);
 app.use("/api/tools", toolsRouter);
 app.use("/api/clawhub", clawhubRouter);
+app.use("/api/projects", projectsRouter);
 
 // Serve sandbox files for preview
 app.use("/sandbox", express.static(SANDBOX_DIR));

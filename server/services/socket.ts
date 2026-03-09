@@ -1,7 +1,7 @@
 import { Server, Socket } from "socket.io";
 import { v4 as uuid } from "uuid";
 import { callTigerBotWithTools, callTigerBot } from "./tigerbot";
-import { getChatHistory, saveChatHistory, ChatSession, getSettings } from "./data";
+import { getChatHistory, saveChatHistory, ChatSession, getSettings, getProjects, getSkills } from "./data";
 import { runPython } from "./python";
 import path from "path";
 import { execSync } from "child_process";
@@ -241,6 +241,170 @@ img.save('${tmpOut}', 'JPEG', quality=80)
           });
           saveChatHistory(sessions);
           socket.emit("chat:response", { sessionId, content: errorContent, done: true, files: outputFiles.length > 0 ? outputFiles : undefined });
+        }
+      }
+    });
+
+    // ─── Project Chat ───
+    socket.on("project:chat:send", async (data: { projectId: string; sessionId: string; message: string; images?: { path: string; type: string }[] }) => {
+      const { projectId, sessionId, message, images } = data;
+      const projects = getProjects();
+      const project = projects.find((p) => p.id === projectId);
+      if (!project) {
+        socket.emit("chat:response", { sessionId, content: "Error: Project not found", done: true });
+        return;
+      }
+
+      // Build project-aware system prompt
+      let projectPrompt = buildSystemPrompt();
+
+      // Inject project memory
+      if (project.memory) {
+        projectPrompt += `\n\n--- PROJECT MEMORY (memory.md) ---\nThe user is working in project "${project.name}". Here is the project memory that records key information:\n\n${project.memory}\n--- END PROJECT MEMORY ---`;
+      }
+
+      // Inject project description
+      if (project.description) {
+        projectPrompt += `\n\nProject description: ${project.description}`;
+      }
+
+      // Inject working folder info
+      if (project.workingFolder) {
+        projectPrompt += `\n\nProject working folder: ${project.workingFolder}\nWhen the user asks about files, search this folder first. Use this folder for reading/writing project files.`;
+      }
+
+      // Inject selected skills
+      if (project.skills && project.skills.length > 0) {
+        const allSkills = getSkills();
+        const selectedSkills = allSkills.filter((s) => project.skills.includes(s.id));
+        if (selectedSkills.length > 0) {
+          projectPrompt += `\n\nProject priority skills: ${selectedSkills.map((s) => s.name).join(", ")}\nThese skills are selected for this project. Prioritize using them when relevant.`;
+        }
+      }
+
+      // Append instruction to auto-record project info
+      projectPrompt += `\n\nIMPORTANT: If the user shares project information (tech stack, architecture decisions, conventions, key files, etc.), suggest recording it to the project memory. You can mention "Would you like me to add this to the project memory?"`;
+
+      // Reuse the same chat session logic
+      const sessions = getChatHistory();
+      let session = sessions.find((s) => s.id === sessionId);
+
+      if (!session) {
+        session = {
+          id: sessionId,
+          title: `[${project.name}] ${message.slice(0, 40)}`,
+          messages: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        sessions.push(session);
+      }
+
+      session.messages.push({
+        role: "user",
+        content: message,
+        timestamp: new Date().toISOString(),
+      });
+      session.updatedAt = new Date().toISOString();
+      saveChatHistory(sessions);
+
+      const settings = getSettings();
+      const chatMessages = session.messages.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      }));
+
+      // Handle images same as regular chat
+      if (images && images.length > 0) {
+        const lastIdx = chatMessages.length - 1;
+        const textContent = chatMessages[lastIdx].content;
+        const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+          { type: "text", text: textContent },
+        ];
+        for (const img of images) {
+          try {
+            const imgPath = path.resolve(img.path);
+            let imgBuffer = fs.readFileSync(imgPath);
+            let mimeType = img.type || "image/png";
+            const MAX_SIZE = 4 * 1024 * 1024;
+            if (imgBuffer.length > MAX_SIZE) {
+              try {
+                const tmpOut = `/tmp/cowork_resized_${Date.now()}.jpg`;
+                execSync(`python3 -c "
+from PIL import Image
+img = Image.open('${imgPath.replace(/'/g, "\\'")}')
+img.thumbnail((1600, 1600), Image.LANCZOS)
+img = img.convert('RGB')
+img.save('${tmpOut}', 'JPEG', quality=80)
+"`, { timeout: 10000 });
+                imgBuffer = fs.readFileSync(tmpOut);
+                mimeType = "image/jpeg";
+                fs.unlinkSync(tmpOut);
+              } catch {}
+            }
+            const base64 = imgBuffer.toString("base64");
+            contentParts.push({
+              type: "image_url",
+              image_url: { url: `data:${mimeType};base64,${base64}` },
+            });
+          } catch {}
+        }
+        (chatMessages[lastIdx] as any).content = contentParts;
+      }
+
+      socket.emit("chat:status", { status: "thinking" });
+      const outputFiles: string[] = [];
+
+      try {
+        const result = await callTigerBotWithTools(
+          chatMessages,
+          projectPrompt,
+          (name, args) => {
+            socket.emit("chat:status", { status: "tool_call", tool: name, args });
+          },
+          (name, toolResult) => {
+            socket.emit("chat:status", { status: "tool_result", tool: name });
+            if (toolResult?.outputFiles) outputFiles.push(...toolResult.outputFiles);
+          }
+        );
+
+        if (result.content) {
+          socket.emit("chat:chunk", { sessionId, content: "\n" + result.content });
+        }
+
+        const fullResponse = result.content +
+          (outputFiles.length > 0 ? `\n\nGenerated files: ${outputFiles.join(", ")}` : "");
+
+        session.messages.push({
+          role: "assistant",
+          content: fullResponse,
+          timestamp: new Date().toISOString(),
+          files: outputFiles.length > 0 ? outputFiles : undefined,
+        });
+        saveChatHistory(sessions);
+        socket.emit("chat:response", { sessionId, content: fullResponse, done: true, files: outputFiles.length > 0 ? outputFiles : undefined });
+      } catch (err: any) {
+        try {
+          const result = await callTigerBot(chatMessages, projectPrompt);
+          const fallbackContent = result.content +
+            (outputFiles.length > 0 ? `\n\nGenerated files: ${outputFiles.join(", ")}` : "");
+          session.messages.push({
+            role: "assistant",
+            content: fallbackContent,
+            timestamp: new Date().toISOString(),
+            files: outputFiles.length > 0 ? outputFiles : undefined,
+          });
+          saveChatHistory(sessions);
+          socket.emit("chat:response", { sessionId, content: fallbackContent, done: true, files: outputFiles.length > 0 ? outputFiles : undefined });
+        } catch (fallbackErr: any) {
+          const errMsg = `Error: ${fallbackErr.message || err.message}`;
+          session.messages.push({
+            role: "assistant",
+            content: errMsg,
+            timestamp: new Date().toISOString(),
+          });
+          saveChatHistory(sessions);
+          socket.emit("chat:response", { sessionId, content: errMsg, done: true });
         }
       }
     });

@@ -108,6 +108,17 @@ export const api = {
     return res.json();
   },
 
+  // Projects
+  getProjects: () => request("/projects"),
+  getProject: (id: string) => request(`/projects/${id}`),
+  createProject: (data: any) => request("/projects", { method: "POST", body: JSON.stringify(data) }),
+  updateProject: (id: string, data: any) => request(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  deleteProject: (id: string) => request(`/projects/${id}`, { method: "DELETE" }),
+  getProjectMemory: (id: string) => request(`/projects/${id}/memory`),
+  saveProjectMemory: (id: string, content: string) => request(`/projects/${id}/memory`, { method: "PUT", body: JSON.stringify({ content }) }),
+  getProjectFiles: (id: string, path?: string) => request(`/projects/${id}/files?path=${encodeURIComponent(path || "")}`),
+  browseFolders: (path?: string) => request(`/projects/browse/folders?path=${encodeURIComponent(path || "/")}`),
+
   // Settings
   getSettings: () => request("/settings"),
   saveSettings: (data: any) => request("/settings", { method: "PUT", body: JSON.stringify(data) }),

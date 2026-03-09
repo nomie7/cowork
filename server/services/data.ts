@@ -72,6 +72,26 @@ export function saveSettings(settings: Settings): void {
   writeJSON("settings.json", settings);
 }
 
+// Projects
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  workingFolder: string;
+  memory: string;
+  skills: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function getProjects(): Project[] {
+  return readJSON("projects.json");
+}
+
+export function saveProjects(projects: Project[]): void {
+  writeJSON("projects.json", projects);
+}
+
 // Skills
 export interface Skill {
   id: string;
