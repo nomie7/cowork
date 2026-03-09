@@ -695,6 +695,14 @@
   color: #137333;
 }
 
+.mobile-sessions-toggle {
+  display: none;
+}
+
+.mobile-sessions-backdrop {
+  display: none;
+}
+
 .project-chat-body {
   display: flex;
   flex: 1;
@@ -879,9 +887,58 @@
     font-size: 24px;
   }
 
-  /* Chat mobile */
-  .project-chat-sessions {
+  /* Chat mobile — session sidebar as slide-in panel */
+  .mobile-sessions-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border: none;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-primary);
+    width: 100%;
+    text-align: left;
+  }
+
+  .mobile-sessions-toggle span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-sessions-backdrop {
     display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 199;
+  }
+
+  .mobile-sessions-backdrop.visible {
+    display: block;
+  }
+
+  .project-chat-sessions {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 260px;
+    z-index: 200;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .project-chat-sessions.mobile-open {
+    transform: translateX(0);
+  }
+
+  .project-chat-body {
+    flex-direction: column;
   }
 
   .project-chat-input-area {

@@ -272,6 +272,7 @@ function ProjectChat({ project, allSkills }: { project: Project; allSkills: Skil
   const [isLoading, setIsLoading] = useState(false);
   const [status, setStatus] = useState("");
   const [outputPanelOpen, setOutputPanelOpen] = useState(true);
+  const [mobileSessions, setMobileSessions] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { connected, sendProjectMessage, onChunk, onResponse, onStatus } = useSocket();
@@ -389,14 +390,23 @@ function ProjectChat({ project, allSkills }: { project: Project; allSkills: Skil
       </div>
 
       <div className="project-chat-body">
+        {/* Mobile session toggle button */}
+        <button className="mobile-sessions-toggle" onClick={() => setMobileSessions(true)}>
+          <Icon name="chat" />
+          <span>{activeSession ? sessions.find(s => s.id === activeSession)?.title?.replace(`[${project.name}] `, "") || "Chat" : "Sessions"}</span>
+        </button>
+
+        {/* Mobile backdrop */}
+        <div className={`mobile-sessions-backdrop ${mobileSessions ? "visible" : ""}`} onClick={() => setMobileSessions(false)} />
+
         {/* Session sidebar */}
-        <div className="project-chat-sessions">
+        <div className={`project-chat-sessions ${mobileSessions ? "mobile-open" : ""}`}>
           <button className="btn btn-primary btn-sm" onClick={createNewSession} style={{ width: "100%" }}>
             <Icon name="add" /> New Chat
           </button>
           <div className="project-session-list">
             {sessions.map((s) => (
-              <div key={s.id} className={`session-item ${activeSession === s.id ? "active" : ""}`} onClick={() => setActiveSession(s.id)}>
+              <div key={s.id} className={`session-item ${activeSession === s.id ? "active" : ""}`} onClick={() => { setActiveSession(s.id); setMobileSessions(false); }}>
                 <span className="session-title">{s.title.replace(`[${project.name}] `, "")}</span>
                 <button className="session-delete btn-icon btn-ghost" onClick={(e) => deleteSession(s.id, e)}>
                   <Icon name="close" />
