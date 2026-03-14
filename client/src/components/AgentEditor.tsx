@@ -14,6 +14,8 @@ interface AgentNode {
   x: number;
   y: number;
   color: string;
+  busEnabled: boolean;
+  busTopics: string[];
 }
 
 interface Connection {
@@ -41,13 +43,7 @@ const ROLE_COLORS: Record<string, string> = {
   default: "#607d8b",
 };
 
-const MODELS = [
-  "claude-opus-4-6",
-  "claude-sonnet-4-6",
-  "claude-haiku-4-5-20251001",
-  "gpt-4o",
-  "gpt-4.1-mini",
-];
+// No hardcoded model list — users type model names and validate against the backend
 
 const ROLES = ["orchestrator", "worker", "checker", "reporter", "researcher"];
 const PROTOCOLS = ["tcp", "bus", "queue"];
@@ -175,26 +171,16 @@ print(json.dumps(result))
               placeholder="e.g. Design Engineer 1"
             />
           </div>
-          <div className="form-row">
-            <div className="form-group">
-              <label>Role</label>
-              <select
-                value={agent.role}
-                onChange={(e) => onUpdate({ ...agent, role: e.target.value, color: ROLE_COLORS[e.target.value] || agent.color })}
-              >
-                {ROLES.map((r) => (
-                  <option key={r} value={r}>{r}</option>
-                ))}
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Model</label>
-              <select value={agent.model} onChange={(e) => onUpdate({ ...agent, model: e.target.value })}>
-                {MODELS.map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-            </div>
+          <div className="form-group">
+            <label>Role</label>
+            <select
+              value={agent.role}
+              onChange={(e) => onUpdate({ ...agent, role: e.target.value, color: ROLE_COLORS[e.target.value] || agent.color })}
+            >
+              {ROLES.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
           </div>
           <div className="form-group">
             <label>Persona</label>
@@ -214,6 +200,31 @@ print(json.dumps(result))
               placeholder="- Parse and interpret requirements&#10;- Assign tasks to sub-agents&#10;- Review outputs"
             />
           </div>
+
+          {/* Bus Connection */}
+          <div className="agent-def-divider">communication</div>
+          <div className="form-group">
+            <label className="bus-toggle-label">
+              <input
+                type="checkbox"
+                checked={agent.busEnabled}
+                onChange={(e) => onUpdate({ ...agent, busEnabled: e.target.checked })}
+              />
+              <span>Connected to Message Bus</span>
+            </label>
+            <p className="bus-hint">Shared broadcast channel — all bus-connected agents can see messages</p>
+          </div>
+          {agent.busEnabled && (
+            <div className="form-group">
+              <label>Bus Topics (one per line)</label>
+              <textarea
+                value={agent.busTopics.join("\n")}
+                onChange={(e) => onUpdate({ ...agent, busTopics: e.target.value.split("\n").filter(Boolean) })}
+                rows={3}
+                placeholder="parameter_share&#10;clash_flag&#10;status_update"
+              />
+            </div>
+          )}
         </div>
       </div>
 
@@ -323,15 +334,85 @@ export default function AgentEditor({
   const [saving, setSaving] = useState(false);
   const [yamlPreview, setYamlPreview] = useState(false);
   const [generatedYaml, setGeneratedYaml] = useState("");
+  const [showFileManager, setShowFileManager] = useState(false);
+  const [existingFiles, setExistingFiles] = useState<{ filename: string; name: string; agentCount: number; updatedAt: string }[]>([]);
+  const [uploadError, setUploadError] = useState("");
 
   const canvasRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load initial YAML if provided
   useEffect(() => {
     if (initialYaml) {
       loadFromYaml(initialYaml);
     }
+    loadExistingFiles();
   }, []);
+
+  const loadExistingFiles = async () => {
+    try {
+      const files = await api.getAgentConfigs();
+      setExistingFiles(Array.isArray(files) ? files : []);
+    } catch {
+      setExistingFiles([]);
+    }
+  };
+
+  const handleUploadYaml = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setUploadError("");
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.match(/\.ya?ml$/i)) {
+      setUploadError("Only .yaml or .yml files are accepted");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const content = ev.target?.result as string;
+      if (!content) return;
+      try {
+        // Save to server
+        const baseName = file.name.replace(/\.ya?ml$/i, "");
+        await api.saveAgentConfig(baseName, content);
+        // Load into editor
+        loadFromYaml(content);
+        setFilename(baseName);
+        await loadExistingFiles();
+      } catch (err: any) {
+        setUploadError(err.message || "Upload failed");
+      }
+    };
+    reader.readAsText(file);
+    // Reset input so same file can be re-uploaded
+    e.target.value = "";
+  };
+
+  const handleLoadFile = async (fname: string) => {
+    try {
+      const result = await api.getAgentConfig(fname);
+      if (result.content) {
+        loadFromYaml(result.content);
+        setFilename(fname.replace(/\.ya?ml$/i, ""));
+        setShowFileManager(false);
+      }
+    } catch (err: any) {
+      console.error("Failed to load file:", err);
+    }
+  };
+
+  const handleDeleteFile = async (fname: string) => {
+    try {
+      await api.deleteAgentConfig(fname);
+      await loadExistingFiles();
+      // If the deleted file is currently loaded, clear the editor
+      if (filename === fname.replace(/\.ya?ml$/i, "")) {
+        setState({ systemName: "Multi-Agent System", orchestrationMode: "hierarchical", agents: [], connections: [] });
+        setFilename("agents");
+      }
+    } catch (err: any) {
+      console.error("Failed to delete file:", err);
+    }
+  };
 
   const loadFromYaml = (content: string) => {
     try {
@@ -348,6 +429,8 @@ export default function AgentEditor({
             x: 100 + (i % 3) * 250,
             y: 80 + Math.floor(i / 3) * 200,
             color: ROLE_COLORS[a.role] || ROLE_COLORS.default,
+            busEnabled: a.bus?.enabled || false,
+            busTopics: a.bus?.topics || [],
           }));
 
           // Extract connections: prefer explicit connections array, fall back to workflow
@@ -420,6 +503,8 @@ export default function AgentEditor({
       x: 150 + Math.random() * 300,
       y: 100 + Math.random() * 200,
       color: ROLE_COLORS.worker,
+      busEnabled: false,
+      busTopics: [],
     };
     setState((s) => ({ ...s, agents: [...s.agents, newAgent] }));
     setSelectedAgent(newAgent.id);
@@ -562,6 +647,12 @@ export default function AgentEditor({
         };
         if (a.persona) agentDef.persona = a.persona;
         if (a.responsibilities.length > 0) agentDef.responsibilities = a.responsibilities;
+        if (a.busEnabled) {
+          agentDef.bus = {
+            enabled: true,
+            topics: a.busTopics.length > 0 ? a.busTopics : undefined,
+          };
+        }
         return agentDef;
       }),
       workflow: {
@@ -664,6 +755,7 @@ export default function AgentEditor({
       if (result.ok) {
         await api.saveAgentConfig(filename, result.content);
         onSave(filename + ".yaml", result.content);
+        await loadExistingFiles();
       }
     } catch (err) {
       console.error("Save failed:", err);
@@ -717,6 +809,22 @@ export default function AgentEditor({
             </div>
           </div>
           <div className="editor-toolbar-right">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".yaml,.yml"
+              style={{ display: "none" }}
+              onChange={handleUploadYaml}
+            />
+            <button className="btn btn-secondary btn-sm" onClick={() => fileInputRef.current?.click()}>
+              Upload YAML
+            </button>
+            <button
+              className={`btn btn-sm ${showFileManager ? "btn-primary" : "btn-secondary"}`}
+              onClick={() => { setShowFileManager(!showFileManager); loadExistingFiles(); }}
+            >
+              Files ({existingFiles.length})
+            </button>
             <button className="btn btn-secondary btn-sm" onClick={addAgent}>
               + Add Agent
             </button>
@@ -739,7 +847,60 @@ export default function AgentEditor({
           </div>
         </div>
 
+        {uploadError && (
+          <div className="upload-error-bar">
+            {uploadError}
+            <button className="btn-icon btn-ghost" onClick={() => setUploadError("")}>&times;</button>
+          </div>
+        )}
+
         <div className="editor-body">
+          {/* File Manager Panel */}
+          {showFileManager && (
+            <div className="file-manager-panel">
+              <div className="file-manager-header">
+                <h3>Architecture Files</h3>
+                <button className="btn-icon btn-ghost" onClick={() => setShowFileManager(false)}>&times;</button>
+              </div>
+              <div className="file-manager-list">
+                {existingFiles.length === 0 && (
+                  <div className="file-manager-empty">No YAML files yet. Upload or save one.</div>
+                )}
+                {existingFiles.map((f) => (
+                  <div key={f.filename} className="file-manager-item">
+                    <div className="file-manager-item-info">
+                      <div className="file-manager-item-name">{f.filename}</div>
+                      <div className="file-manager-item-meta">
+                        {f.name} &middot; {f.agentCount} agent{f.agentCount !== 1 ? "s" : ""}
+                      </div>
+                    </div>
+                    <div className="file-manager-item-actions">
+                      <button
+                        className="btn btn-sm btn-secondary"
+                        onClick={() => handleLoadFile(f.filename)}
+                        title="Load into editor"
+                      >
+                        Load
+                      </button>
+                      <button
+                        className="btn btn-sm btn-danger"
+                        onClick={() => handleDeleteFile(f.filename)}
+                        title="Delete file"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="file-manager-footer">
+                <button className="btn btn-secondary btn-sm" onClick={() => fileInputRef.current?.click()}>
+                  Upload YAML
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Canvas */}
           <div
             ref={canvasRef}
@@ -872,6 +1033,11 @@ export default function AgentEditor({
                       <div className="agent-node-name">{agent.name || agent.id}</div>
                       <div className="agent-node-model">{agent.model.split("-").slice(-2).join("-")}</div>
                     </div>
+                    {agent.busEnabled && (
+                      <div className="agent-node-bus-badge" title={`Bus topics: ${agent.busTopics.join(", ") || "all"}`}>
+                        BUS
+                      </div>
+                    )}
                     <div className="agent-node-port" title="Shift+drag to connect">
                       <div className="port-dot" />
                     </div>

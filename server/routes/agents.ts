@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import yaml from "js-yaml";
 import { getProtocolStatus } from "../services/protocols";
+import { getSettings } from "../services/data";
 
 const router = Router();
 const AGENTS_DIR = path.resolve("data/agents");
@@ -105,6 +106,44 @@ router.post("/generate", (req, res) => {
     res.json({ ok: true, content: yamlContent });
   } catch (err: any) {
     res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// Validate model availability by calling the provider's /models endpoint
+router.post("/validate-model", async (req, res) => {
+  const { model } = req.body;
+  if (!model || typeof model !== "string") {
+    return res.status(400).json({ ok: false, error: "model is required" });
+  }
+
+  const settings = getSettings();
+  const apiKey = settings.tigerBotApiKey;
+  if (!apiKey) {
+    return res.json({ ok: false, error: "API key not configured", available: false });
+  }
+
+  const rawUrl = settings.tigerBotApiUrl || "https://api.tigerbot.com/bot-chat/openai/v1/chat/completions";
+  // Derive /models endpoint from the API URL
+  const modelsUrl = rawUrl.replace(/\/chat\/completions\/?$/, "/models").replace(/\/$/, "");
+
+  try {
+    const response = await fetch(modelsUrl, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+
+    if (!response.ok) {
+      // If /models endpoint is not available, we can't validate — assume ok
+      return res.json({ ok: true, available: true, warning: "Cannot list models from provider, model not validated" });
+    }
+
+    const data: any = await response.json();
+    const models: string[] = (data.data || data.models || []).map((m: any) => typeof m === "string" ? m : m.id || m.name || "");
+    const available = models.some((m: string) => m === model || m.includes(model) || model.includes(m));
+
+    res.json({ ok: true, available, models });
+  } catch (err: any) {
+    // Network error — can't validate, assume ok
+    res.json({ ok: true, available: true, warning: `Could not reach models endpoint: ${err.message}` });
   }
 });
 

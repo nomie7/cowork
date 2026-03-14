@@ -216,7 +216,7 @@ const spawnSubagentTool = {
 
 // ─── Protocol Tools (TCP / Bus / Queue) ───
 
-const protocolTools = [
+const tcpTools = [
   {
     type: "function" as const,
     function: {
@@ -247,15 +247,18 @@ const protocolTools = [
       },
     },
   },
+];
+
+const busTools = [
   {
     type: "function" as const,
     function: {
       name: "proto_bus_publish",
-      description: "Publish a message to the shared event bus. All subscribed agents on the same session can see it.",
+      description: "Publish a message to the shared event bus. All bus-connected agents on the same session can see it.",
       parameters: {
         type: "object",
         properties: {
-          topic: { type: "string", description: "Topic to publish to (e.g. 'clash_flag', 'parameter_share')" },
+          topic: { type: "string", description: "Topic to publish to" },
           payload: { type: "string", description: "Message content" },
         },
         required: ["topic", "payload"],
@@ -276,6 +279,9 @@ const protocolTools = [
       },
     },
   },
+];
+
+const queueTools = [
   {
     type: "function" as const,
     function: {
@@ -325,6 +331,9 @@ const protocolTools = [
   },
 ];
 
+// All protocol tools combined (for backward compat / orchestrator)
+const protocolTools = [...tcpTools, ...busTools, ...queueTools];
+
 // OpenRouter Web Search tool (conditionally included)
 const openRouterSearchTool = {
   type: "function" as const,
@@ -340,6 +349,33 @@ const openRouterSearchTool = {
     },
   },
 };
+
+// Get protocol tools filtered by agent config
+export function getProtocolToolsForAgent(agentDef?: AgentConfig | null, connections?: any[]): any[] {
+  if (!agentDef) return protocolTools; // no config = give all (orchestrator / auto mode)
+
+  const tools: any[] = [];
+
+  // Bus: only if agent has bus.enabled
+  if (agentDef.bus?.enabled) {
+    tools.push(...busTools);
+  }
+
+  // TCP/Queue: check if agent has connections using these protocols
+  if (connections && connections.length > 0) {
+    const agentConns = connections.filter(
+      (c: any) => c.from === agentDef.id || c.to === agentDef.id
+    );
+    const protocols = new Set(agentConns.map((c: any) => c.protocol));
+    if (protocols.has("tcp")) tools.push(...tcpTools);
+    if (protocols.has("queue")) tools.push(...queueTools);
+  } else {
+    // No connections info available — give tcp + queue as fallback
+    tools.push(...tcpTools, ...queueTools);
+  }
+
+  return tools;
+}
 
 // Dynamic tools getter: built-in + MCP tools + conditional OpenRouter search + sub-agent
 export function getTools(opts?: { excludeSubagent?: boolean }) {
@@ -390,12 +426,27 @@ export function getManualAgentConfigSummary(): string | null {
   return summary;
 }
 
-// Get tools for sub-agents (no spawn_subagent to prevent infinite recursion at max depth)
-export function getToolsForSubagent(currentDepth: number): ReturnType<typeof getTools> {
+// Get tools for sub-agents — filters protocol tools based on agent config
+export function getToolsForSubagent(
+  currentDepth: number,
+  agentDef?: AgentConfig | null,
+  connections?: any[]
+): any[] {
   const settings = getSettings();
   const maxDepth = settings.subAgentMaxDepth || 2;
-  // Sub-agents can spawn their own sub-agents if not at max depth
-  return getTools({ excludeSubagent: currentDepth >= maxDepth });
+  const tools: any[] = [...builtinTools];
+
+  if (settings.openRouterSearchEnabled && settings.openRouterSearchApiKey) {
+    tools.push(openRouterSearchTool);
+  }
+  if (settings.subAgentEnabled && currentDepth < maxDepth) {
+    tools.push(spawnSubagentTool);
+  }
+  if (settings.subAgentEnabled) {
+    // Only give protocol tools the agent is configured to use
+    tools.push(...getProtocolToolsForAgent(agentDef, connections));
+  }
+  return [...tools, ...getMcpTools()];
 }
 
 // Keep backward-compat export (static reference for imports that use `tools`)
@@ -932,11 +983,16 @@ interface AgentConfig {
   responsibilities: string[];
   constraints?: string[];
   tools_allowed?: string[];
+  bus?: {
+    enabled: boolean;
+    topics?: string[];
+  };
 }
 
 interface AgentSystemConfig {
   system: { name: string; orchestration_mode: string };
   agents: AgentConfig[];
+  connections?: any[];
   workflow?: any;
   communication?: any;
 }
@@ -1064,6 +1120,8 @@ export async function spawnSubagent(
   // Build sub-agent system prompt — check for manual YAML config
   let subPrompt: string;
   const subModel = settings.subAgentModel || undefined;
+  let resolvedAgentDef: AgentConfig | null = null;
+  let resolvedConnections: any[] | undefined;
 
   if (settings.subAgentMode === "manual" && settings.subAgentConfigFile) {
     // Load agent definition from YAML config
@@ -1071,8 +1129,10 @@ export async function spawnSubagent(
     const agentDef = systemConfig?.agents?.find((a: AgentConfig) =>
       a.id === args.agentId || a.id === label || a.name === label
     );
+    resolvedConnections = systemConfig?.connections;
 
     if (agentDef && systemConfig) {
+      resolvedAgentDef = agentDef;
       subPrompt = getManualAgentPrompt(agentDef, systemConfig);
       subPrompt += `\nYOUR TASK:\n${args.task}\n`;
       if (args.context) subPrompt += `\nADDITIONAL CONTEXT:\n${args.context}\n`;
@@ -1117,14 +1177,29 @@ RULES:
 You are sub-agent "${label}" at depth ${currentDepth + 1}/${maxDepth}.`;
   }
 
-  // Append protocol instructions
-  subPrompt += `\n
-COMMUNICATION PROTOCOLS:
-You have access to inter-agent communication tools. Your agent ID is "${agentId}".
-- TCP (proto_tcp_send / proto_tcp_read): Point-to-point messaging with a specific agent
-- Bus (proto_bus_publish / proto_bus_history): Broadcast messages to all agents on a topic
-- Queue (proto_queue_send / proto_queue_receive / proto_queue_peek): FIFO message queue to another agent
-Use these to coordinate with peer agents when your task requires collaboration.`;
+  // Append protocol instructions based on agent's actual config
+  const agentProtoTools = getProtocolToolsForAgent(resolvedAgentDef, resolvedConnections);
+  const protoNames = agentProtoTools.map((t: any) => t.function.name);
+  const hasProto = protoNames.length > 0;
+
+  if (hasProto) {
+    const protoLines: string[] = [];
+    if (protoNames.some((n: string) => n.startsWith("proto_tcp"))) {
+      protoLines.push("- TCP (proto_tcp_send / proto_tcp_read): Point-to-point messaging with a specific agent");
+    }
+    if (protoNames.some((n: string) => n.startsWith("proto_bus"))) {
+      const topicHint = resolvedAgentDef?.bus?.topics?.length
+        ? ` Your configured topics: ${resolvedAgentDef.bus.topics.join(", ")}`
+        : "";
+      protoLines.push(`- Bus (proto_bus_publish / proto_bus_history): Broadcast messages to all bus-connected agents on a topic.${topicHint}`);
+    }
+    if (protoNames.some((n: string) => n.startsWith("proto_queue"))) {
+      protoLines.push("- Queue (proto_queue_send / proto_queue_receive / proto_queue_peek): FIFO message queue to another agent");
+    }
+    subPrompt += `\n\nCOMMUNICATION PROTOCOLS:\nYour agent ID is "${agentId}".\n${protoLines.join("\n")}\nUse these to coordinate with peer agents when your task requires collaboration.`;
+  } else {
+    subPrompt += `\n\nYour agent ID is "${agentId}". You have no inter-agent communication protocols configured.`;
+  }
 
   // Set agent context so protocol tools know who we are
   const prevAgentId = _currentAgentId;
@@ -1141,6 +1216,9 @@ Use these to coordinate with peer agents when your task requires collaboration.`
     const combinedSignal = signal && typeof (AbortSignal as any).any === "function"
       ? (AbortSignal as any).any([signal, timeoutController.signal])
       : timeoutController.signal;
+
+    // Build filtered tool set for this sub-agent
+    const subagentTools = getToolsForSubagent(currentDepth + 1, resolvedAgentDef, resolvedConnections);
 
     const result = await callAgent(
       [{ role: "user" as const, content: args.task }],
@@ -1172,6 +1250,7 @@ Use these to coordinate with peer agents when your task requires collaboration.`
         }
       },
       combinedSignal,
+      subagentTools,
     );
 
     clearTimeout(timeoutId);

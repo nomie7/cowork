@@ -92,7 +92,8 @@ export async function callTigerBotWithTools(
   systemPrompt?: string,
   onToolCall?: (name: string, args: any) => void,
   onToolResult?: (name: string, result: any) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  toolsOverride?: any[]
 ): Promise<TigerBotResponse> {
   const { apiKey } = getApiConfig();
   if (!apiKey) {
@@ -122,7 +123,7 @@ export async function callTigerBotWithTools(
     }
     let data: any;
     try {
-      data = await llmCall(allMessages, { tools: getTools(), signal });
+      data = await llmCall(allMessages, { tools: toolsOverride || getTools(), signal });
     } catch (err: any) {
       if (err.name === "AbortError") {
         return { content: earlyContent || "Task was cancelled.", toolResults };

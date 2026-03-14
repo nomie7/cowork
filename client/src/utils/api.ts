@@ -157,4 +157,5 @@ export const api = {
   deleteAgentConfig: (filename: string) => request(`/agents/${encodeURIComponent(filename)}`, { method: "DELETE" }),
   parseAgentYaml: (content: string) => request("/agents/parse", { method: "POST", body: JSON.stringify({ content }) }),
   generateAgentYaml: (data: any) => request("/agents/generate", { method: "POST", body: JSON.stringify(data) }),
+  validateModel: (model: string) => request("/agents/validate-model", { method: "POST", body: JSON.stringify({ model }) }),
 };

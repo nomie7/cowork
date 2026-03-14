@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { api } from "../utils/api";
 import "./PageStyles.css";
 
@@ -33,6 +33,8 @@ export default function SettingsPage() {
   const [showAgentEditor, setShowAgentEditor] = useState(false);
   const [agentConfigs, setAgentConfigs] = useState<any[]>([]);
   const [agentEditorInitYaml, setAgentEditorInitYaml] = useState<string | undefined>();
+  const [uploadError, setUploadError] = useState("");
+  const yamlUploadRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api.getSettings().then(setSettings);
@@ -40,6 +42,31 @@ export default function SettingsPage() {
     api.getFileTokens().then(setFileTokens).catch(() => {});
     api.getAgentConfigs().then(setAgentConfigs).catch(() => {});
   }, []);
+
+  const handleYamlUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setUploadError("");
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.match(/\.ya?ml$/i)) {
+      setUploadError("Only .yaml or .yml files are accepted");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const content = ev.target?.result as string;
+      if (!content) return;
+      try {
+        const baseName = file.name.replace(/\.ya?ml$/i, "");
+        await api.saveAgentConfig(baseName, content);
+        const configs = await api.getAgentConfigs();
+        setAgentConfigs(configs);
+      } catch (err: any) {
+        setUploadError(err.message || "Upload failed — check YAML syntax");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
 
   const save = async () => {
     await api.saveSettings(settings);
@@ -372,7 +399,7 @@ export default function SettingsPage() {
                     </div>
                   )}
 
-                  {/* Create Agent Config */}
+                  {/* Create / Upload Agent Config */}
                   <div className="form-actions" style={{ gap: 8, flexWrap: "wrap" }}>
                     <button
                       className="btn btn-primary"
@@ -384,8 +411,28 @@ export default function SettingsPage() {
                       </svg>
                       Swarm Agent Creator
                     </button>
+                    <input
+                      ref={yamlUploadRef}
+                      type="file"
+                      accept=".yaml,.yml"
+                      style={{ display: "none" }}
+                      onChange={handleYamlUpload}
+                    />
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => yamlUploadRef.current?.click()}
+                      style={{ display: "flex", alignItems: "center", gap: 6 }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/>
+                      </svg>
+                      Upload YAML
+                    </button>
+                    {uploadError && (
+                      <p style={{ width: "100%", margin: 0, color: "#ea4335", fontSize: 12 }}>{uploadError}</p>
+                    )}
                     <p className="hint" style={{ width: "100%", margin: 0 }}>
-                      Open the graphical editor to visually design your agent team with drag-and-drop, connection lines, and communication protocols.
+                      Design agents visually with the Swarm Creator, or upload an existing .yaml architecture file.
                     </p>
                   </div>
                 </>
