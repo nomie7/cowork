@@ -47,6 +47,9 @@ ${code}
 
     fs.writeFileSync(scriptPath, wrappedCode);
 
+    // Record start time to detect files created during this execution
+    const startTime = Date.now();
+
     const proc = spawn(pythonPath, [scriptPath], {
       cwd: sandboxDir,
       timeout,
@@ -63,9 +66,9 @@ ${code}
       // Clean up temp script
       try { fs.unlinkSync(scriptPath); } catch {}
 
-      // Detect newly created files in output_file/ subfolder
+      // Detect files created/modified during this execution in output_file/ subfolder
       const outputFiles: string[] = [];
-      const outputExts = [".pdf", ".docx", ".doc", ".xlsx", ".csv", ".png", ".jpg", ".jpeg", ".svg", ".html", ".gif", ".webp"];
+      const outputExts = [".pdf", ".docx", ".doc", ".xlsx", ".csv", ".png", ".jpg", ".jpeg", ".svg", ".html", ".gif", ".webp", ".txt", ".md"];
       const scanDirs = [path.join(sandboxDir, "output_file")];
       try {
         for (const dir of scanDirs) {
@@ -76,7 +79,8 @@ ${code}
             if (outputExts.includes(ext)) {
               const fullPath = path.join(dir, f);
               const stat = fs.statSync(fullPath);
-              if (Date.now() - stat.mtimeMs < 30000) {
+              // Include files modified after script started (not a fixed window)
+              if (stat.mtimeMs >= startTime - 1000) {
                 // Store relative path from sandboxDir
                 const relPath = path.relative(sandboxDir, fullPath);
                 outputFiles.push(relPath);

@@ -718,7 +718,7 @@ function writeFileTool(args: { path: string; content: string; append?: boolean }
   }
   // Return outputFiles so the file appears in the output panel
   const ext = path.extname(args.path).toLowerCase();
-  const outputExts = [".pdf", ".docx", ".doc", ".xlsx", ".csv", ".png", ".jpg", ".jpeg", ".svg", ".html", ".gif", ".webp"];
+  const outputExts = [".pdf", ".docx", ".doc", ".xlsx", ".csv", ".png", ".jpg", ".jpeg", ".svg", ".html", ".gif", ".webp", ".txt", ".md"];
   const relPath = path.relative(sandboxDir, target);
   const outputFiles = outputExts.includes(ext) ? [relPath] : [];
   return { ok: true, path: target, bytes: Buffer.byteLength(args.content), outputFiles };

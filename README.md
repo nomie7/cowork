@@ -16,7 +16,7 @@ A self-hosted AI-powered workspace that combines chat, project management, file 
 
 *Skills management page showing installed skills from multiple sources — built-in, OpenClaw marketplace, and ClawHub community skills. Each skill can be enabled/disabled or uninstalled individually.*
 
-![Tiger Cowork — Agent System Editor](picture/agent.png)
+![Tiger Cowork — Agent System Editor](picture/agent2.png)
 
 *Agent System Editor with visual canvas for designing multi-agent systems. Drag-and-drop agent nodes, connect via input/output ports with configurable protocols (TCP, Bus, Queue), toggle bus per agent, and edit definitions with AI-assisted setup. Upload, load, and manage YAML files directly. Exports to YAML for the sub-agent system.*
 
