@@ -2,6 +2,34 @@
 
 # Tiger Cowork v0.2.2
 
+## Quick Start (No coding required)
+
+### One-Click Install for Mac
+
+1. **Download** [`TigerCoworkInstaller.app`](https://github.com/Sompote/tiger_cowork/releases/latest) (zip file)
+2. **Unzip** and **double-click** `TigerCoworkInstaller.app`
+3. **Choose** a folder to install — that's it!
+
+The installer will automatically:
+- Install Docker Desktop if you don't have it
+- Download Tiger Cowork
+- Build and start the app
+- Open your browser at `http://localhost:3001`
+
+### After Installation
+
+- **To start the app** — go to your install folder and double-click `TigerCowork.app`
+- **To stop the app** — open Docker Desktop → Containers → click stop on `tiger-cowork`
+- **To set an access token** — edit the `.env` file in your install folder and set `ACCESS_TOKEN=your-token`
+
+### Alternative: Install via Terminal
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Sompote/tiger_cowork/main/install.sh | bash
+```
+
+---
+
 > **⚠️ WARNING: This application executes AI-generated code, shell commands, and third-party skills on your machine. Please run it inside a sandboxed environment (e.g. Docker) to protect your host system. See [Security Notice](#security-notice) below.**
 
 A self-hosted AI-powered workspace that combines chat, project management, file management, code execution, scheduled tasks, a visual multi-agent system editor with realtime agent orchestration, and a skill marketplace — all in one web interface. Compatible with any **OpenAI-compatible API** (OpenRouter, TigerBot, Ollama, etc.) with tool-calling capabilities.
