@@ -1,6 +1,6 @@
 ![Tiger Cowork Banner](picture/tigerbanner.jpg)
 
-# Tiger Cowork v0.2.3
+# Tiger Cowork v0.2.4
 
 ## Quick Start (No coding required)
 
@@ -293,7 +293,16 @@ Configure these in **Settings > Agent Parameters > Sub-Agent**.
 - Complex analysis: break a report into sections, each handled by a dedicated sub-agent
 - Realtime orchestration: boot an entire agent team (orchestrator + workers + checker) and send tasks for true parallel execution with inter-agent communication via bus
 
-## What's New in v0.2.2
+## What's New in v0.2.4
+
+- **Rich file preview in Files page** — Clicking files in the sandbox file browser now shows visual previews instead of raw source code. Supported formats: images (PNG, JPG, GIF, WebP, SVG, BMP), HTML (rendered in iframe), Excel (XLS/XLSX as tables), PDF (extracted text), Word (DOCX/DOC), Markdown (rendered with headings, tables, code blocks), and video/audio (native player controls).
+- **Excel file preview** — New `xlsx` library for server-side Excel parsing. Excel files are converted to HTML tables with sheet name headers, viewable in the output panel, project file preview, and sandbox file browser.
+- **Markdown file preview** — Markdown files are rendered with full GFM support (tables, code blocks, blockquotes) using ReactMarkdown in all preview contexts.
+- **Auto-generate project memory from chat** — New "Generate from Chat" button in the project Memory tab. Uses the LLM to analyze all project chat sessions and generate a structured memory document (overview, tech stack, key decisions, file structure, conventions, current status). The generated draft opens in edit mode for the user to review and confirm before saving.
+- **Skill enabled/disabled enforced in backend** — Disabling a skill in the Skills page now truly removes it from the LLM system prompt. Previously, ClawHub and custom skills loaded from directories ignored the `enabled` flag — they were always included regardless of the frontend toggle.
+- **Project skill selection enforced in backend** — When a project has specific skills selected, the system prompt now only includes those skills (filtered at the `buildSystemPrompt` level). Previously, all skills were loaded and the selected ones were only mentioned as a text "priority" hint.
+
+### Previous: v0.2.2
 
 - **Realtime Agent Mode** — New sub-agent operating mode where all agents from a YAML config boot at session start and stay alive. Tasks are sent via `send_task` / `wait_result` tools for true parallel execution. Agents communicate through the message bus and protocol tools. The orchestrator delegates to the agent team hierarchy automatically.
 - **New orchestrator tools** — `send_task` (assign work to a running agent), `wait_result` (block until agent finishes), `check_agents` (view status of all agents in the session).
@@ -355,8 +364,8 @@ Configure these in **Settings > Agent Parameters > Sub-Agent**.
     - **Read & Write** — Agent can read and write files but cannot run shell commands
     - **Full Access** — Agent can read, write, and execute shell commands
 - **Docker volume mounts** — For external folders, the Overview tab generates ready-to-copy `docker run` and `docker-compose` volume mount commands with correct `:ro`/`:rw` flags
-- **Project memory** — A persistent markdown notepad injected into every chat message as context. Record tech stack decisions, conventions, key file paths, or anything the AI should remember across sessions
-- **Skill selection** — Choose which installed skills are prioritized for each project so the AI reaches for the right tools
+- **Project memory** — A persistent markdown notepad injected into every chat message as context. Record tech stack decisions, conventions, key file paths, or anything the AI should remember across sessions. Includes **auto-generate from chat** — the LLM analyzes project chat history and drafts a structured memory document for you to review and confirm
+- **Skill selection** — Choose which installed skills are available for each project. The backend enforces this selection — only selected skills are included in the LLM system prompt, not just hinted as priorities
 - **Project chat** — Each project has its own chat interface with a session sidebar. Chat sessions are automatically prefixed with the project name and inherit the project's memory, working folder, and selected skills as context
 - **Output panel** — Generated files (React components, charts, HTML reports, PDFs, Word documents) render in a collapsible right-side panel within the project chat, just like the main chat
 - **Overview dashboard** — Quick glance at working folder, location type, access level, memory size, and selected skill count
@@ -384,8 +393,24 @@ Configure these in **Settings > Agent Parameters > Sub-Agent**.
 - **HTML reports** — Rendered in sandboxed iframes
 - **PDF files** — Inline preview with extracted text and page count
 - **Word documents** — DOCX/DOC preview with converted HTML content
+- **Excel files** — XLS/XLSX rendered as HTML tables with sheet names
+- **Markdown files** — Rendered with GFM support (headings, tables, code blocks, blockquotes)
 - **Other files** — Download chips for any other format
 - Toggle button with file count badge when the panel is closed
+
+### File Browser (Sandbox Files)
+- Browse, upload, create, and delete files in the sandbox directory
+- **Rich preview** — Click any file to see a visual preview instead of raw content:
+  - Images (PNG, JPG, GIF, WebP, SVG, BMP) — inline display
+  - HTML — rendered in iframe
+  - Excel (XLS/XLSX) — parsed and displayed as styled tables
+  - PDF — extracted text with page breaks
+  - Word (DOC/DOCX) — converted to HTML
+  - Markdown — rendered with GFM (tables, code blocks, headings)
+  - Video (MP4, WebM) / Audio (MP3, WAV, OGG) — native player controls
+  - Text files — source code with edit/save support
+- Drag-and-drop file upload
+- Breadcrumb navigation and directory creation
 
 ### Python Execution
 - Run Python code directly from chat or the dedicated Python runner
