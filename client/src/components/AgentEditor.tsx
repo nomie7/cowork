@@ -72,51 +72,35 @@ function AgentDefPanel({
 }) {
   const [llmPrompt, setLlmPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
+  const [showModelInput, setShowModelInput] = useState(!!agent.model);
+  const [modelValidating, setModelValidating] = useState(false);
+  const [modelValid, setModelValid] = useState<boolean | null>(null);
+
+  // Reset model UI state when switching to a different agent
+  useEffect(() => {
+    setShowModelInput(!!agent.model);
+    setModelValid(null);
+    setModelValidating(false);
+  }, [agent.id]);
 
   const generateWithLLM = async () => {
     if (!llmPrompt.trim()) return;
     setGenerating(true);
     try {
-      // Use the chat API to generate agent definition
-      const result = await api.runPython(`
-import json
-prompt = """Based on this description, generate a JSON object for an agent definition:
-Description: ${llmPrompt.replace(/"/g, '\\"')}
-
-Return ONLY a JSON object with these fields:
-- name: string
-- role: one of [orchestrator, worker, checker, reporter, researcher]
-- model: one of [claude-opus-4-6, claude-sonnet-4-6]
-- persona: detailed persona description (2-3 sentences)
-- responsibilities: array of 3-5 responsibility strings
-"""
-# Just output a template since we can't call LLM from Python
-result = {
-    "name": "${agent.name || "New Agent"}",
-    "role": "worker",
-    "model": "claude-sonnet-4-6",
-    "persona": f"You are a specialized agent based on: ${llmPrompt.replace(/"/g, '\\"').slice(0, 200)}",
-    "responsibilities": [
-        "Analyze and process assigned tasks",
-        "Report findings to the orchestrator",
-        "Collaborate with peer agents when needed"
-    ]
-}
-print(json.dumps(result))
-`);
-      if (result.stdout) {
-        try {
-          const parsed = JSON.parse(result.stdout.trim());
-          onUpdate({
-            ...agent,
-            name: parsed.name || agent.name,
-            role: parsed.role || agent.role,
-            model: parsed.model || agent.model,
-            persona: parsed.persona || agent.persona,
-            responsibilities: parsed.responsibilities || agent.responsibilities,
-            color: ROLE_COLORS[parsed.role] || agent.color,
-          });
-        } catch {}
+      const result = await api.generateAgentDefinition(llmPrompt);
+      if (result.ok && result.definition) {
+        const parsed = result.definition;
+        onUpdate({
+          ...agent,
+          name: parsed.name || agent.name,
+          role: parsed.role || agent.role,
+          model: agent.model,
+          persona: parsed.persona || agent.persona,
+          responsibilities: Array.isArray(parsed.responsibilities) ? parsed.responsibilities : agent.responsibilities,
+          color: ROLE_COLORS[parsed.role] || agent.color,
+        });
+      } else {
+        console.error("Agent generation failed:", result.error || result.raw);
       }
     } catch (err) {
       console.error("LLM generation failed:", err);
@@ -181,6 +165,62 @@ print(json.dumps(result))
                 <option key={r} value={r}>{r}</option>
               ))}
             </select>
+          </div>
+          <div className="form-group">
+            <label className="model-checkbox-label">
+              <input
+                type="checkbox"
+                checked={showModelInput}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setShowModelInput(checked);
+                  if (!checked) {
+                    onUpdate({ ...agent, model: "" });
+                    setModelValid(null);
+                  }
+                }}
+              />
+              <span>Specify model for this agent</span>
+            </label>
+            {!showModelInput && (
+              <p className="model-hint">Using system default model</p>
+            )}
+            {showModelInput && (
+              <>
+                <div className="model-input-row">
+                  <input
+                    value={agent.model}
+                    onChange={(e) => {
+                      onUpdate({ ...agent, model: e.target.value });
+                      setModelValid(null);
+                    }}
+                    placeholder="e.g. claude-opus-4-6, gpt-4o, gemini-pro"
+                  />
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={async () => {
+                      setModelValidating(true);
+                      try {
+                        const res = await api.validateModel(agent.model);
+                        setModelValid(res.available);
+                      } catch {
+                        setModelValid(false);
+                      }
+                      setModelValidating(false);
+                    }}
+                    disabled={modelValidating || !agent.model.trim()}
+                  >
+                    {modelValidating ? "..." : "Validate"}
+                  </button>
+                </div>
+                {modelValid === true && (
+                  <span className="model-valid-msg">Model available</span>
+                )}
+                {modelValid === false && (
+                  <span className="model-invalid-msg">Model not found — you can still use it</span>
+                )}
+              </>
+            )}
           </div>
           <div className="form-group">
             <label>Persona</label>
@@ -314,10 +354,12 @@ export default function AgentEditor({
   onClose,
   onSave,
   initialYaml,
+  initialFilename,
 }: {
   onClose: () => void;
   onSave: (filename: string, content: string) => void;
   initialYaml?: string;
+  initialFilename?: string;
 }) {
   const [state, setState] = useState<EditorState>({
     systemName: "Multi-Agent System",
@@ -330,7 +372,7 @@ export default function AgentEditor({
   const [selectedConn, setSelectedConn] = useState<string | null>(null);
   const [dragging, setDragging] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null);
   const [connecting, setConnecting] = useState<{ fromId: string; mouseX: number; mouseY: number } | null>(null);
-  const [filename, setFilename] = useState("agents");
+  const [filename, setFilename] = useState(initialFilename?.replace(/\.ya?ml$/i, "") || "agents");
   const [saving, setSaving] = useState(false);
   const [yamlPreview, setYamlPreview] = useState(false);
   const [generatedYaml, setGeneratedYaml] = useState("");
@@ -345,6 +387,9 @@ export default function AgentEditor({
   useEffect(() => {
     if (initialYaml) {
       loadFromYaml(initialYaml);
+    }
+    if (initialFilename) {
+      setFilename(initialFilename.replace(/\.ya?ml$/i, ""));
     }
     loadExistingFiles();
   }, []);
@@ -423,7 +468,7 @@ export default function AgentEditor({
             id: a.id || generateId(),
             name: a.name || "Agent " + (i + 1),
             role: a.role || "worker",
-            model: a.model || "claude-sonnet-4-6",
+            model: a.model || "",
             persona: a.persona || "",
             responsibilities: a.responsibilities || [],
             x: 100 + (i % 3) * 250,
@@ -497,7 +542,7 @@ export default function AgentEditor({
       id: "agent_" + (state.agents.length + 1),
       name: "New Agent",
       role: "worker",
-      model: "claude-sonnet-4-6",
+      model: "",
       persona: "",
       responsibilities: [],
       x: 150 + Math.random() * 300,
@@ -644,8 +689,8 @@ export default function AgentEditor({
           id: a.id,
           name: a.name,
           role: a.role,
-          model: a.model,
         };
+        if (a.model) agentDef.model = a.model;
         if (a.persona) agentDef.persona = a.persona;
         if (a.responsibilities.length > 0) agentDef.responsibilities = a.responsibilities;
         if (a.busEnabled) {
@@ -1094,7 +1139,7 @@ export default function AgentEditor({
           <div className="yaml-preview-overlay" onClick={() => setYamlPreview(false)}>
             <div className="yaml-preview-modal" onClick={(e) => e.stopPropagation()}>
               <div className="yaml-preview-header">
-                <h3>Generated YAML</h3>
+                <h3>{filename}.yaml</h3>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button
                     className="btn btn-secondary btn-sm"

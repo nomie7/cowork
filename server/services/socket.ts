@@ -539,13 +539,20 @@ img.save('${tmpOut}', 'JPEG', quality=80)
         return;
       }
 
+      // Resolve working folder (handle relative paths)
+      const settings_proj = getSettings();
+      const sandboxDir_proj = settings_proj.sandboxDir || path.resolve("sandbox");
+      const resolvedWorkingFolder = project.workingFolder
+        ? (path.isAbsolute(project.workingFolder) ? project.workingFolder : path.join(sandboxDir_proj, project.workingFolder))
+        : "";
+
       // Build project-aware system prompt
       let projectPrompt = buildSystemPrompt();
 
       // Read project memory fresh from {workingFolder}/memory.md every time
       let projectMemory = "";
-      if (project.workingFolder) {
-        const memoryPath = path.join(project.workingFolder, "memory.md");
+      if (resolvedWorkingFolder) {
+        const memoryPath = path.join(resolvedWorkingFolder, "memory.md");
         try {
           if (fs.existsSync(memoryPath)) {
             projectMemory = fs.readFileSync(memoryPath, "utf-8");
@@ -570,8 +577,8 @@ img.save('${tmpOut}', 'JPEG', quality=80)
       }
 
       // Inject working folder info
-      if (project.workingFolder) {
-        projectPrompt += `\n\nProject working folder: ${project.workingFolder}\nWhen the user asks about files, search this folder first. Use this folder for reading/writing project files.`;
+      if (resolvedWorkingFolder) {
+        projectPrompt += `\n\nProject working folder: ${resolvedWorkingFolder}\nWhen the user asks about files, search this folder first. Use this folder for reading/writing project files.\nIMPORTANT: All output files (charts, reports, documents, etc.) are saved directly to this project working folder. The Python working directory (os.chdir) is set to this folder. PROJECT_DIR also points to this folder.`;
       }
 
       // Inject selected skills
@@ -674,8 +681,8 @@ img.save('${tmpOut}', 'JPEG', quality=80)
       taskAbortControllers.set(taskId, abortController);
 
       try {
-        // Set call context for sub-agent spawning
-        setCallContext(sessionId, 0);
+        // Set call context for sub-agent spawning — pass project working folder so output goes there
+        setCallContext(sessionId, 0, undefined, resolvedWorkingFolder || undefined);
 
         // Boot realtime agents if in realtime mode
         const rtSettings = getSettings();

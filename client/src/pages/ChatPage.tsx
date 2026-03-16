@@ -86,6 +86,37 @@ function DocPreview({ file }: { file: string }) {
   );
 }
 
+function MarkdownPreview({ file }: { file: string }) {
+  const [content, setContent] = useState<string>("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>("");
+
+  useEffect(() => {
+    setLoading(true);
+    setError("");
+    api.previewFile(file).then((data: any) => {
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setContent(data.html || "");
+      }
+      setLoading(false);
+    }).catch((err: any) => {
+      setError(err.message || "Failed to load preview");
+      setLoading(false);
+    });
+  }, [file]);
+
+  if (loading) return <div className="doc-preview-loading">Loading preview...</div>;
+  if (error) return <div className="doc-preview-error">Preview unavailable: {error}</div>;
+
+  return (
+    <div className="doc-preview-content markdown-preview">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{content}</ReactMarkdown>
+    </div>
+  );
+}
+
 function OutputCanvas({ files }: { files: string[] }) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -94,7 +125,9 @@ function OutputCanvas({ files }: { files: string[] }) {
   const htmlFiles = files.filter((f) => getFileExt(f) === "html" && !f.endsWith(".jsx.js"));
   const pdfFiles = files.filter((f) => getFileExt(f) === "pdf");
   const docFiles = files.filter((f) => ["doc", "docx"].includes(getFileExt(f)));
-  const otherFiles = files.filter((f) => !images.includes(f) && !reactFiles.includes(f) && !htmlFiles.includes(f) && !pdfFiles.includes(f) && !docFiles.includes(f));
+  const excelFiles = files.filter((f) => ["xls", "xlsx"].includes(getFileExt(f)));
+  const mdFiles = files.filter((f) => getFileExt(f) === "md");
+  const otherFiles = files.filter((f) => !images.includes(f) && !reactFiles.includes(f) && !htmlFiles.includes(f) && !pdfFiles.includes(f) && !docFiles.includes(f) && !excelFiles.includes(f) && !mdFiles.includes(f));
 
   return (
     <div className="output-canvas">
@@ -185,6 +218,38 @@ function OutputCanvas({ files }: { files: string[] }) {
             </div>
           </div>
           <DocPreview file={f} />
+        </div>
+      ))}
+
+      {/* Excel file preview */}
+      {excelFiles.map((f) => (
+        <div key={f} className="canvas-doc-wrap">
+          <div className="canvas-doc-header">
+            <div className="canvas-doc-icon excel">XLS</div>
+            <span>{f.split("/").pop()}</span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <a href={api.downloadUrl(f)} download className="canvas-dl-btn" title="Download">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+              </a>
+            </div>
+          </div>
+          <DocPreview file={f} />
+        </div>
+      ))}
+
+      {/* Markdown file preview */}
+      {mdFiles.map((f) => (
+        <div key={f} className="canvas-doc-wrap">
+          <div className="canvas-doc-header">
+            <div className="canvas-doc-icon md">MD</div>
+            <span>{f.split("/").pop()}</span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <a href={api.downloadUrl(f)} download className="canvas-dl-btn" title="Download">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+              </a>
+            </div>
+          </div>
+          <MarkdownPreview file={f} />
         </div>
       ))}
 

@@ -129,6 +129,25 @@ export const api = {
   getProjectMemory: (id: string) => request(`/projects/${id}/memory`),
   saveProjectMemory: (id: string, content: string) => request(`/projects/${id}/memory`, { method: "PUT", body: JSON.stringify({ content }) }),
   getProjectFiles: (id: string, path?: string) => request(`/projects/${id}/files?path=${encodeURIComponent(path || "")}`),
+  projectMkdir: (id: string, name: string, subPath?: string) => request(`/projects/${id}/files/mkdir`, { method: "POST", body: JSON.stringify({ name, path: subPath || "" }) }),
+  projectDeleteFile: (id: string, filePath: string) => request(`/projects/${id}/files?path=${encodeURIComponent(filePath)}`, { method: "DELETE" }),
+  projectDownloadUrl: (id: string, filePath: string) => {
+    const token = getAccessToken();
+    return `/api/projects/${id}/files/download?path=${encodeURIComponent(filePath)}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
+  },
+  projectSandboxPath: (id: string, filePath: string) => request(`/projects/${id}/files/sandbox-path?path=${encodeURIComponent(filePath)}`),
+  projectUploadFile: async (id: string, file: File, subPath?: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (subPath) form.append("path", subPath);
+    const token = getAccessToken();
+    const res = await fetch(`${BASE}/projects/${id}/files/upload`, {
+      method: "POST",
+      body: form,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    return res.json();
+  },
 
   // Settings
   getSettings: () => request("/settings"),
@@ -158,4 +177,5 @@ export const api = {
   parseAgentYaml: (content: string) => request("/agents/parse", { method: "POST", body: JSON.stringify({ content }) }),
   generateAgentYaml: (data: any) => request("/agents/generate", { method: "POST", body: JSON.stringify(data) }),
   validateModel: (model: string) => request("/agents/validate-model", { method: "POST", body: JSON.stringify({ model }) }),
+  generateAgentDefinition: (description: string) => request("/agents/generate-definition", { method: "POST", body: JSON.stringify({ description }) }),
 };

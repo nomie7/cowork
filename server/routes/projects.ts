@@ -3,8 +3,28 @@ import { getProjects, saveProjects, getSettings, Project } from "../services/dat
 import { v4 as uuid } from "uuid";
 import fs from "fs";
 import path from "path";
+import multer from "multer";
 
 export const projectsRouter = Router();
+
+const projectUpload = multer({ dest: "/tmp/cowork-uploads" });
+
+// Helper to resolve project working folder (handles relative paths)
+function resolveWorkingFolder(project: Project): string {
+  if (!project.workingFolder) return "";
+  if (path.isAbsolute(project.workingFolder)) return project.workingFolder;
+  const settings = getSettings();
+  const sandboxDir = settings.sandboxDir || path.resolve("sandbox");
+  return path.join(sandboxDir, project.workingFolder);
+}
+
+// Helper to get sandbox-relative path for a file in a project
+function projectFileRelPath(resolvedFolder: string, subFilePath: string): string {
+  const settings = getSettings();
+  const sandboxDir = settings.sandboxDir || path.resolve("sandbox");
+  const fullPath = path.join(resolvedFolder, subFilePath);
+  return path.relative(sandboxDir, fullPath);
+}
 
 // List all projects
 projectsRouter.get("/", (_req, res) => {
@@ -137,8 +157,9 @@ projectsRouter.get("/:id/files", (req, res) => {
   if (!project) return res.status(404).json({ error: "Project not found" });
   if (!project.workingFolder) return res.json({ files: [] });
 
+  const resolved = resolveWorkingFolder(project);
   const subPath = (req.query.path as string) || "";
-  const fullPath = path.join(project.workingFolder, subPath);
+  const fullPath = path.join(resolved, subPath);
 
   if (!fs.existsSync(fullPath)) return res.json({ files: [] });
 
@@ -154,4 +175,108 @@ projectsRouter.get("/:id/files", (req, res) => {
   } catch (err: any) {
     res.json({ files: [], error: err.message });
   }
+});
+
+// Upload file to project working folder
+projectsRouter.post("/:id/files/upload", projectUpload.single("file"), (req, res) => {
+  const projects = getProjects();
+  const project = projects.find((p) => p.id === req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  if (!project.workingFolder) return res.status(400).json({ error: "No working folder" });
+  if (!req.file) return res.status(400).json({ error: "No file" });
+
+  const resolved = resolveWorkingFolder(project);
+  const subPath = req.body.path || "";
+  const destDir = subPath ? path.join(resolved, subPath) : resolved;
+  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+
+  const destPath = path.join(destDir, req.file.originalname);
+  fs.renameSync(req.file.path, destPath);
+  res.json({ success: true, name: req.file.originalname });
+});
+
+// Create directory in project working folder
+projectsRouter.post("/:id/files/mkdir", (req, res) => {
+  const projects = getProjects();
+  const project = projects.find((p) => p.id === req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  if (!project.workingFolder) return res.status(400).json({ error: "No working folder" });
+
+  const dirName = req.body.name;
+  const subPath = req.body.path || "";
+  if (!dirName) return res.status(400).json({ error: "name required" });
+
+  const resolved = resolveWorkingFolder(project);
+  const fullPath = path.join(resolved, subPath, dirName);
+
+  // Prevent path traversal
+  if (!fullPath.startsWith(resolved)) return res.status(403).json({ error: "Invalid path" });
+
+  if (!fs.existsSync(fullPath)) fs.mkdirSync(fullPath, { recursive: true });
+  res.json({ success: true });
+});
+
+// Delete file/directory in project working folder
+projectsRouter.delete("/:id/files", (req, res) => {
+  const projects = getProjects();
+  const project = projects.find((p) => p.id === req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  if (!project.workingFolder) return res.status(400).json({ error: "No working folder" });
+
+  const filePath = req.query.path as string;
+  if (!filePath) return res.status(400).json({ error: "path required" });
+
+  const resolved = resolveWorkingFolder(project);
+  const fullPath = path.join(resolved, filePath);
+
+  // Prevent path traversal
+  if (!fullPath.startsWith(resolved)) return res.status(403).json({ error: "Invalid path" });
+
+  if (!fs.existsSync(fullPath)) return res.status(404).json({ error: "File not found" });
+
+  try {
+    const stat = fs.statSync(fullPath);
+    if (stat.isDirectory()) {
+      fs.rmSync(fullPath, { recursive: true });
+    } else {
+      fs.unlinkSync(fullPath);
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Download file from project working folder
+projectsRouter.get("/:id/files/download", (req, res) => {
+  const projects = getProjects();
+  const project = projects.find((p) => p.id === req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  if (!project.workingFolder) return res.status(400).json({ error: "No working folder" });
+
+  const filePath = req.query.path as string;
+  if (!filePath) return res.status(400).json({ error: "path required" });
+
+  const resolved = resolveWorkingFolder(project);
+  const fullPath = path.join(resolved, filePath);
+
+  if (!fullPath.startsWith(resolved)) return res.status(403).json({ error: "Invalid path" });
+  if (!fs.existsSync(fullPath)) return res.status(404).json({ error: "File not found" });
+
+  res.download(fullPath);
+});
+
+// Get sandbox-relative path for a project file (for preview/display in output panel)
+projectsRouter.get("/:id/files/sandbox-path", (req, res) => {
+  const projects = getProjects();
+  const project = projects.find((p) => p.id === req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  if (!project.workingFolder) return res.status(400).json({ error: "No working folder" });
+
+  const filePath = req.query.path as string;
+  if (!filePath) return res.status(400).json({ error: "path required" });
+
+  const resolved = resolveWorkingFolder(project);
+  const relPath = projectFileRelPath(resolved, filePath);
+  res.json({ sandboxPath: relPath });
 });

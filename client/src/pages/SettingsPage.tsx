@@ -33,6 +33,7 @@ export default function SettingsPage() {
   const [showAgentEditor, setShowAgentEditor] = useState(false);
   const [agentConfigs, setAgentConfigs] = useState<any[]>([]);
   const [agentEditorInitYaml, setAgentEditorInitYaml] = useState<string | undefined>();
+  const [agentEditorInitFilename, setAgentEditorInitFilename] = useState<string | undefined>();
   const [uploadError, setUploadError] = useState("");
   const yamlUploadRef = useRef<HTMLInputElement>(null);
 
@@ -381,6 +382,7 @@ export default function SettingsPage() {
                               const data = await api.getAgentConfig(cfg.filename);
                               if (data.content) {
                                 setAgentEditorInitYaml(data.content);
+                                setAgentEditorInitFilename(cfg.filename);
                                 setShowAgentEditor(true);
                               }
                             }}
@@ -406,7 +408,7 @@ export default function SettingsPage() {
                   <div className="form-actions" style={{ gap: 8, flexWrap: "wrap" }}>
                     <button
                       className="btn btn-primary"
-                      onClick={() => { setAgentEditorInitYaml(undefined); setShowAgentEditor(true); }}
+                      onClick={() => { setAgentEditorInitYaml(undefined); setAgentEditorInitFilename(undefined); setShowAgentEditor(true); }}
                       style={{ display: "flex", alignItems: "center", gap: 6 }}
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -653,10 +655,12 @@ export default function SettingsPage() {
       {showAgentEditor && (
         <Suspense fallback={<div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>Loading editor...</div>}>
           <AgentEditor
-            onClose={() => { setShowAgentEditor(false); setAgentEditorInitYaml(undefined); }}
+            onClose={() => { setShowAgentEditor(false); setAgentEditorInitYaml(undefined); setAgentEditorInitFilename(undefined); }}
+            initialFilename={agentEditorInitFilename}
             onSave={async (savedFilename) => {
               setShowAgentEditor(false);
               setAgentEditorInitYaml(undefined);
+              setAgentEditorInitFilename(undefined);
               // Refresh agent configs list
               const configs = await api.getAgentConfigs();
               setAgentConfigs(configs);

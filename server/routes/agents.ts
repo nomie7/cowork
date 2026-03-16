@@ -4,6 +4,7 @@ import path from "path";
 import yaml from "js-yaml";
 import { getProtocolStatus } from "../services/protocols";
 import { getSettings } from "../services/data";
+import { callTigerBotWithTools } from "../services/tigerbot";
 
 const router = Router();
 const AGENTS_DIR = path.resolve("data/agents");
@@ -106,6 +107,52 @@ router.post("/generate", (req, res) => {
     res.json({ ok: true, content: yamlContent });
   } catch (err: any) {
     res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+// Generate agent definition using LLM
+router.post("/generate-definition", async (req, res) => {
+  const { description } = req.body;
+  if (!description || typeof description !== "string") {
+    return res.status(400).json({ ok: false, error: "description is required" });
+  }
+
+  try {
+    const result = await callTigerBotWithTools(
+      [{ role: "user", content: `Based on this description, generate a JSON object for an agent definition.
+
+Description: ${description}
+
+Return ONLY a valid JSON object (no markdown, no code fences) with these fields:
+- "name": string (short agent name)
+- "role": one of ["orchestrator", "worker", "checker", "reporter", "researcher"]
+- "persona": detailed persona description (2-3 sentences)
+- "responsibilities": array of 3-5 responsibility strings
+
+Example:
+{"name": "Code Reviewer", "role": "checker", "persona": "You are a meticulous code reviewer who checks for bugs, security issues, and best practices.", "responsibilities": ["Review code for correctness", "Check for security vulnerabilities", "Suggest improvements"]}` }],
+      "You are a helpful assistant that generates JSON agent definitions. Return ONLY valid JSON, nothing else. Do not use any tools.",
+      undefined,
+      undefined,
+      undefined,
+      [], // no tools
+    );
+
+    if (result.content) {
+      let jsonStr = result.content.trim();
+      const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+      if (jsonMatch) jsonStr = jsonMatch[0];
+      try {
+        const parsed = JSON.parse(jsonStr);
+        res.json({ ok: true, definition: parsed });
+      } catch {
+        res.json({ ok: false, error: "Failed to parse LLM response", raw: result.content });
+      }
+    } else {
+      res.json({ ok: false, error: "No response from LLM" });
+    }
+  } catch (err: any) {
+    res.json({ ok: false, error: err.message });
   }
 });
 

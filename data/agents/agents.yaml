@@ -7,7 +7,7 @@ agents:
   - id: agent_1
     name: Project manager
     role: orchestrator
-    model: claude-sonnet-4-6
+    model: ''
     persona: 'You are a specialized agent based on: Project manager for civil engineering design'
     responsibilities:
       - Analyze and process assigned tasks
@@ -18,7 +18,7 @@ agents:
   - id: agent_2
     name: structure engineer
     role: worker
-    model: claude-sonnet-4-6
+    model: ''
     persona: 'You are a specialized agent based on: Design engineer, structural engineer'
     responsibilities:
       - Analyze and process assigned tasks
@@ -29,7 +29,7 @@ agents:
   - id: agent_3
     name: checker
     role: checker
-    model: claude-sonnet-4-6
+    model: ''
     persona: 'You are a specialized agent based on: Senior engineer, careful, and experienced.'
     responsibilities:
       - >-
@@ -40,7 +40,7 @@ agents:
   - id: agent_4
     name: geotechnical engineer
     role: worker
-    model: claude-sonnet-4-6
+    model: ''
     persona: You are a geotechnical engineer. Expert in underground investigations and foundation.
     responsibilities:
       - Analyze and process assigned tasks
@@ -53,7 +53,7 @@ agents:
   - id: agent_5
     name: report engineer
     role: reporter
-    model: claude-sonnet-4-6
+    model: google/gemini-3-flash-preview
     persona: 'You are a specialized agent based on: agetn that expert in make a report for engineer'
     responsibilities:
       - Analyze and process assigned tasks

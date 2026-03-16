@@ -591,7 +591,7 @@ async function fetchUrl(args: { url: string; method?: string }): Promise<any> {
 async function runPythonTool(args: { code: string }): Promise<any> {
   const settings = getSettings();
   const sandboxDir = settings.sandboxDir || path.resolve("sandbox");
-  const result = await runPython(args.code, sandboxDir, 60000);
+  const result = await runPython(args.code, sandboxDir, 60000, _currentProjectWorkingFolder);
   return {
     exitCode: result.exitCode,
     stdout: result.stdout.slice(0, 20000),
@@ -603,7 +603,7 @@ async function runPythonTool(args: { code: string }): Promise<any> {
 async function runReactTool(args: { code: string; title?: string; dependencies?: string[] }): Promise<any> {
   const settings = getSettings();
   const sandboxDir = settings.sandboxDir || path.resolve("sandbox");
-  const outputDir = path.join(sandboxDir, "output_file");
+  const outputDir = _currentProjectWorkingFolder || path.join(sandboxDir, "output_file");
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
   let code = args.code || "";
@@ -708,7 +708,7 @@ function readFileTool(args: { path?: string; file?: string; filepath?: string })
 function writeFileTool(args: { path: string; content: string; append?: boolean }): any {
   const settings = getSettings();
   const sandboxDir = settings.sandboxDir || path.resolve("sandbox");
-  const outputDir = path.join(sandboxDir, "output_file");
+  const outputDir = _currentProjectWorkingFolder || path.join(sandboxDir, "output_file");
   const target = path.resolve(outputDir, args.path);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   if (args.append) {
@@ -1278,9 +1278,10 @@ You are sub-agent "${label}" at depth ${currentDepth + 1}/${maxDepth}.`;
     subPrompt += `\n\nYour agent ID is "${agentId}". You have no inter-agent communication protocols configured.`;
   }
 
-  // Set agent context so protocol tools know who we are
+  // Set agent context so protocol tools know who we are — preserve project folder
   const prevAgentId = _currentAgentId;
-  setCallContext(parentSessionId, currentDepth + 1, agentId);
+  const prevProjectFolder = _currentProjectWorkingFolder;
+  setCallContext(parentSessionId, currentDepth + 1, agentId, _currentProjectWorkingFolder);
 
   try {
     const callAgent = await getSubagentCaller();
@@ -1296,6 +1297,9 @@ You are sub-agent "${label}" at depth ${currentDepth + 1}/${maxDepth}.`;
 
     // Build filtered tool set for this sub-agent
     const subagentTools = getToolsForSubagent(currentDepth + 1, resolvedAgentDef, resolvedConnections, resolvedSystemConfig);
+
+    // Use agent-specific model if defined, fall back to system sub-agent model override
+    const agentModel = resolvedAgentDef?.model || subModel || undefined;
 
     const result = await callAgent(
       [{ role: "user" as const, content: args.task }],
@@ -1328,11 +1332,12 @@ You are sub-agent "${label}" at depth ${currentDepth + 1}/${maxDepth}.`;
       },
       combinedSignal,
       subagentTools,
+      agentModel,
     );
 
     clearTimeout(timeoutId);
     // Restore parent agent context
-    setCallContext(parentSessionId, currentDepth, prevAgentId);
+    setCallContext(parentSessionId, currentDepth, prevAgentId, prevProjectFolder);
 
     run.status = "completed";
     run.completedAt = new Date().toISOString();
@@ -1363,7 +1368,7 @@ You are sub-agent "${label}" at depth ${currentDepth + 1}/${maxDepth}.`;
     };
   } catch (err: any) {
     // Restore parent agent context
-    setCallContext(parentSessionId, currentDepth, prevAgentId);
+    setCallContext(parentSessionId, currentDepth, prevAgentId, prevProjectFolder);
     run.status = "error";
     run.completedAt = new Date().toISOString();
 
@@ -1633,15 +1638,19 @@ async function realtimeAgentLoop(
         });
       }
 
-      // Set call context so protocol tools know who we are
+      // Set call context so protocol tools know who we are — preserve project folder
       const prevAgentId = _currentAgentId;
-      setCallContext(sessionId, 0, agentId);
+      const prevProjectFolder = _currentProjectWorkingFolder;
+      setCallContext(sessionId, 0, agentId, _currentProjectWorkingFolder);
 
       // Get the tool-calling function
       const callAgent = await getSubagentCaller();
 
       // Run LLM tool loop for this task
       const taskPrompt = `${systemPrompt}\n\nYOUR TASK:\n${msg.payload.task}${msg.payload.context ? `\n\nADDITIONAL CONTEXT:\n${msg.payload.context}` : ""}`;
+
+      // Use agent-specific model from YAML definition if set
+      const realtimeAgentModel = agentDef.model || undefined;
 
       const result = await callAgent(
         [{ role: "user" as const, content: msg.payload.task }],
@@ -1671,10 +1680,11 @@ async function realtimeAgentLoop(
         },
         signal,
         finalTools,
+        realtimeAgentModel,
       );
 
       // Restore context
-      setCallContext(sessionId, 0, prevAgentId);
+      setCallContext(sessionId, 0, prevAgentId, prevProjectFolder);
 
       const resultContent = result.content || "(no result)";
       handle.lastResult = resultContent.slice(0, 5000);
@@ -1922,15 +1932,17 @@ export function getRealtimeAgentConfigSummary(): string | null {
 
 // --- Dispatcher ---
 
-// Track parent session ID, depth, and agent ID for sub-agent context
+// Track parent session ID, depth, agent ID, and project working folder for context
 let _currentParentSessionId: string | undefined;
 let _currentSubagentDepth: number = 0;
 let _currentAgentId: string = "main";
+let _currentProjectWorkingFolder: string | undefined;
 
-export function setCallContext(sessionId?: string, depth?: number, agentId?: string) {
+export function setCallContext(sessionId?: string, depth?: number, agentId?: string, projectWorkingFolder?: string) {
   _currentParentSessionId = sessionId;
   _currentSubagentDepth = depth || 0;
   _currentAgentId = agentId || "main";
+  _currentProjectWorkingFolder = projectWorkingFolder;
 }
 
 export async function callTool(name: string, args: any): Promise<any> {

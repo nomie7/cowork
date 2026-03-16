@@ -14,5 +14,25 @@
     ],
     "createdAt": "2026-03-09T02:42:32.823Z",
     "updatedAt": "2026-03-09T03:33:15.250Z"
+  },
+  {
+    "id": "cc3aa3dd-3154-486a-9ab4-275ea3dc4262",
+    "name": "BOQ",
+    "description": "BOQ",
+    "workingFolder": "/root/cowork/project/boq",
+    "memory": "",
+    "skills": [
+      "b336a1f9-e173-4b60-8ef1-4d11eebc8b26",
+      "19c484fd-fb78-47fe-b849-bd3d1276a7ab",
+      "3cdc16e7-b9f6-4ecc-a45a-74d19a27d7b6",
+      "95067b76-80ec-4389-9874-ac607a4a8d0e",
+      "3546b381-0fe3-4c62-ba02-1e83af4959c4",
+      "85f148c4-45a5-403e-96ae-807be792dc50",
+      "ac2a249f-9b3d-40fa-8a69-899d6876ae0e",
+      "8495d368-4261-4d8d-b924-26a45fd29896",
+      "5b0b5ca9-aa66-411b-8171-903f0dd68c62"
+    ],
+    "createdAt": "2026-03-16T10:46:13.040Z",
+    "updatedAt": "2026-03-16T11:50:02.134Z"
   }
 ]

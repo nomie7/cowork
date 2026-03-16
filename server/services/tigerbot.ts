@@ -93,7 +93,8 @@ export async function callTigerBotWithTools(
   onToolCall?: (name: string, args: any) => void,
   onToolResult?: (name: string, result: any) => void,
   signal?: AbortSignal,
-  toolsOverride?: any[]
+  toolsOverride?: any[],
+  modelOverride?: string
 ): Promise<TigerBotResponse> {
   const { apiKey } = getApiConfig();
   if (!apiKey) {
@@ -117,13 +118,17 @@ export async function callTigerBotWithTools(
   let lastUsage: any = undefined;
   let earlyContent: string | null = null;
 
+  if (modelOverride) {
+    console.log(`[ToolLoop] Using model override: ${modelOverride}`);
+  }
+
   for (let round = 0; round < maxToolRounds; round++) {
     if (signal?.aborted) {
       return { content: earlyContent || "Task was cancelled.", toolResults };
     }
     let data: any;
     try {
-      data = await llmCall(allMessages, { tools: toolsOverride || getTools(), signal });
+      data = await llmCall(allMessages, { tools: toolsOverride || getTools(), signal, model: modelOverride });
     } catch (err: any) {
       if (err.name === "AbortError") {
         return { content: earlyContent || "Task was cancelled.", toolResults };

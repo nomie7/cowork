@@ -470,19 +470,42 @@
   border-color: #ea4335;
 }
 
-.model-status {
-  font-size: 11px;
-  margin-top: 4px;
-  padding: 2px 0;
-  color: var(--text-tertiary, #888);
+.model-checkbox-label {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: var(--text-primary, #eee) !important;
 }
 
-.model-status.model-valid {
+.model-checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #4285f4;
+  cursor: pointer;
+}
+
+.model-hint {
+  font-size: 11px;
+  color: var(--text-tertiary, #888);
+  margin: 4px 0 0 0;
+  line-height: 1.4;
+}
+
+.model-valid-msg {
+  display: block;
+  font-size: 11px;
+  margin-top: 4px;
   color: #34a853;
 }
 
-.model-status.model-invalid {
-  color: #ea4335;
+.model-invalid-msg {
+  display: block;
+  font-size: 11px;
+  margin-top: 4px;
+  color: #ea8600;
 }
 
 /* ─── Upload Error Bar ─── */

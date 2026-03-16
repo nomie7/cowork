@@ -13,15 +13,16 @@ export interface PythonResult {
 export function runPython(
   code: string,
   sandboxDir: string,
-  timeout: number = 30000
+  timeout: number = 30000,
+  projectOutputDir?: string
 ): Promise<PythonResult> {
   return new Promise((resolve) => {
     const settings = getSettings();
     const pythonPath = settings.pythonPath || "python3";
     const scriptPath = path.join(sandboxDir, `_run_${Date.now()}.py`);
 
-    // Wrap code to capture output files — work in output_file/ subfolder
-    const outputDir = path.join(sandboxDir, "output_file");
+    // Use project working folder if provided, otherwise fall back to output_file/
+    const outputDir = projectOutputDir || path.join(sandboxDir, "output_file");
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
     const wrappedCode = `
@@ -39,8 +40,8 @@ try:
 except ImportError:
     pass
 
-# PROJECT_DIR points to the project root (for accessing uploads/, data/, etc.)
-PROJECT_DIR = ${JSON.stringify(sandboxDir)}
+# PROJECT_DIR points to the project root (or project working folder if in project context)
+PROJECT_DIR = ${JSON.stringify(projectOutputDir || sandboxDir)}
 os.chdir(${JSON.stringify(outputDir)})
 ${code}
 `;
@@ -66,10 +67,10 @@ ${code}
       // Clean up temp script
       try { fs.unlinkSync(scriptPath); } catch {}
 
-      // Detect files created/modified during this execution in output_file/ subfolder
+      // Detect files created/modified during this execution in the output directory
       const outputFiles: string[] = [];
       const outputExts = [".pdf", ".docx", ".doc", ".xlsx", ".csv", ".png", ".jpg", ".jpeg", ".svg", ".html", ".gif", ".webp", ".txt", ".md"];
-      const scanDirs = [path.join(sandboxDir, "output_file")];
+      const scanDirs = [outputDir];
       try {
         for (const dir of scanDirs) {
           if (!fs.existsSync(dir)) continue;

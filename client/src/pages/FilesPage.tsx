@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef } from "react";
-import { api } from "../utils/api";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
+import { api, sandboxUrl } from "../utils/api";
 import "./PageStyles.css";
 
 interface FileEntry {
@@ -22,6 +25,7 @@ export default function FilesPage() {
   const [showNewDir, setShowNewDir] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [richPreview, setRichPreview] = useState<{ type: string; html: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -33,15 +37,51 @@ export default function FilesPage() {
     setFiles(data);
   };
 
+  const richPreviewExts = [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".md"];
+  const imageExts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"];
+  const mediaExts = [".mp4", ".webm", ".mp3", ".wav", ".ogg"];
+
   const openFile = async (file: FileEntry) => {
     if (file.isDirectory) {
       setCurrentPath(file.path);
       setSelectedFile(null);
+      setRichPreview(null);
     } else {
-      const data = await api.readFile(file.path);
-      setSelectedFile(file.path);
-      setFileContent(data.content);
-      setEditing(false);
+      const ext = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
+      if (imageExts.includes(ext)) {
+        setSelectedFile(file.path);
+        setFileContent("");
+        setEditing(false);
+        setRichPreview({ type: "image", html: "" });
+      } else if (richPreviewExts.includes(ext)) {
+        setSelectedFile(file.path);
+        setFileContent("");
+        setEditing(false);
+        setRichPreview(null);
+        try {
+          const data = await api.previewFile(file.path);
+          setRichPreview({ type: data.type, html: data.html });
+        } catch {
+          setRichPreview({ type: "error", html: "Preview unavailable" });
+        }
+      } else if (ext === ".html" || ext === ".htm") {
+        setSelectedFile(file.path);
+        setFileContent("");
+        setEditing(false);
+        setRichPreview({ type: "html", html: "" });
+      } else if (mediaExts.includes(ext)) {
+        setSelectedFile(file.path);
+        setFileContent("");
+        setEditing(false);
+        const isVideo = [".mp4", ".webm"].includes(ext);
+        setRichPreview({ type: isVideo ? "video" : "audio", html: "" });
+      } else {
+        const data = await api.readFile(file.path);
+        setSelectedFile(file.path);
+        setFileContent(data.content);
+        setEditing(false);
+        setRichPreview(null);
+      }
     }
   };
 
@@ -233,7 +273,7 @@ export default function FilesPage() {
           <div className="panel-header">
             <h3>{selectedFile}</h3>
             <div className="panel-actions">
-              {editing ? (
+              {richPreview ? null : editing ? (
                 <>
                   <button className="btn btn-primary" onClick={saveFile}>Save</button>
                   <button className="btn btn-ghost" onClick={() => setEditing(false)}>Cancel</button>
@@ -243,7 +283,31 @@ export default function FilesPage() {
               )}
             </div>
           </div>
-          {editing ? (
+          {richPreview ? (
+            richPreview.type === "image" && selectedFile ? (
+              <div className="file-preview rich-preview" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <img src={sandboxUrl(selectedFile, true)} alt={selectedFile} style={{ maxWidth: "100%", maxHeight: "100%" }} />
+              </div>
+            ) : richPreview.type === "html" && selectedFile ? (
+              <iframe src={sandboxUrl(selectedFile, true)} className="file-preview" style={{ border: "none", width: "100%", flex: 1, minHeight: 500 }} title={selectedFile} />
+            ) : richPreview.type === "video" && selectedFile ? (
+              <div className="file-preview rich-preview" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <video src={sandboxUrl(selectedFile)} controls style={{ maxWidth: "100%", maxHeight: "100%" }} />
+              </div>
+            ) : richPreview.type === "audio" && selectedFile ? (
+              <div className="file-preview rich-preview" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <audio src={sandboxUrl(selectedFile)} controls />
+              </div>
+            ) : richPreview.type === "markdown" ? (
+              <div className="file-preview rich-preview markdown-preview">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{richPreview.html}</ReactMarkdown>
+              </div>
+            ) : richPreview.type === "error" ? (
+              <div className="file-preview rich-preview" style={{ color: "#e57373", padding: 24, textAlign: "center" }}>{richPreview.html}</div>
+            ) : (
+              <div className="file-preview rich-preview" dangerouslySetInnerHTML={{ __html: richPreview.html }} />
+            )
+          ) : editing ? (
             <textarea className="file-editor" value={fileContent} onChange={(e) => setFileContent(e.target.value)} />
           ) : (
             <pre className="file-preview">{fileContent}</pre>

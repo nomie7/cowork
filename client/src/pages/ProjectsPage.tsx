@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import { api, sandboxUrl } from "../utils/api";
 import { useSocket } from "../hooks/useSocket";
 import { Icon } from "../components/Layout";
@@ -86,6 +87,37 @@ function DocPreview({ file }: { file: string }) {
   );
 }
 
+function MarkdownPreview({ file }: { file: string }) {
+  const [content, setContent] = useState<string>("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>("");
+
+  useEffect(() => {
+    setLoading(true);
+    setError("");
+    api.previewFile(file).then((data: any) => {
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setContent(data.html || "");
+      }
+      setLoading(false);
+    }).catch((err: any) => {
+      setError(err.message || "Failed to load preview");
+      setLoading(false);
+    });
+  }, [file]);
+
+  if (loading) return <div className="doc-preview-loading">Loading preview...</div>;
+  if (error) return <div className="doc-preview-error">Preview unavailable: {error}</div>;
+
+  return (
+    <div className="doc-preview-content markdown-preview">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{content}</ReactMarkdown>
+    </div>
+  );
+}
+
 function OutputCanvas({ files }: { files: string[] }) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -94,7 +126,9 @@ function OutputCanvas({ files }: { files: string[] }) {
   const htmlFiles = files.filter((f) => getFileExt(f) === "html" && !f.endsWith(".jsx.js"));
   const pdfFiles = files.filter((f) => getFileExt(f) === "pdf");
   const docFiles = files.filter((f) => ["doc", "docx"].includes(getFileExt(f)));
-  const otherFiles = files.filter((f) => !images.includes(f) && !reactFiles.includes(f) && !htmlFiles.includes(f) && !pdfFiles.includes(f) && !docFiles.includes(f));
+  const excelFiles = files.filter((f) => ["xls", "xlsx"].includes(getFileExt(f)));
+  const mdFiles = files.filter((f) => getFileExt(f) === "md");
+  const otherFiles = files.filter((f) => !images.includes(f) && !reactFiles.includes(f) && !htmlFiles.includes(f) && !pdfFiles.includes(f) && !docFiles.includes(f) && !excelFiles.includes(f) && !mdFiles.includes(f));
 
   return (
     <div className="output-canvas">
@@ -180,6 +214,38 @@ function OutputCanvas({ files }: { files: string[] }) {
             </div>
           </div>
           <DocPreview file={f} />
+        </div>
+      ))}
+
+      {/* Excel file preview */}
+      {excelFiles.map((f) => (
+        <div key={f} className="canvas-doc-wrap">
+          <div className="canvas-doc-header">
+            <div className="canvas-doc-icon excel">XLS</div>
+            <span>{f.split("/").pop()}</span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <a href={api.downloadUrl(f)} download className="canvas-dl-btn" title="Download">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+              </a>
+            </div>
+          </div>
+          <DocPreview file={f} />
+        </div>
+      ))}
+
+      {/* Markdown file preview */}
+      {mdFiles.map((f) => (
+        <div key={f} className="canvas-doc-wrap">
+          <div className="canvas-doc-header">
+            <div className="canvas-doc-icon md">MD</div>
+            <span>{f.split("/").pop()}</span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <a href={api.downloadUrl(f)} download className="canvas-dl-btn" title="Download">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+              </a>
+            </div>
+          </div>
+          <MarkdownPreview file={f} />
         </div>
       ))}
 
@@ -652,9 +718,25 @@ export default function ProjectsPage() {
     setEditing(true);
   };
 
+  const [previewFile, setPreviewFile] = useState<string | null>(null);
+  const [mkdirOpen, setMkdirOpen] = useState(false);
+  const [mkdirName, setMkdirName] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const navigateFile = (entry: FileEntry) => {
     if (!activeProject) return;
-    if (entry.isDirectory) { setFilePath(entry.path); loadFiles(activeProject, entry.path); }
+    if (entry.isDirectory) { setFilePath(entry.path); loadFiles(activeProject, entry.path); setPreviewFile(null); }
+  };
+
+  const clickFile = async (entry: FileEntry) => {
+    if (!activeProject || entry.isDirectory) return;
+    // Get the sandbox-relative path for display in output panel
+    try {
+      const data = await api.projectSandboxPath(activeProject.id, entry.path);
+      setPreviewFile(data.sandboxPath);
+    } catch {
+      setPreviewFile(null);
+    }
   };
 
   const navigateUp = () => {
@@ -662,6 +744,31 @@ export default function ProjectsPage() {
     const parent = filePath.split("/").slice(0, -1).join("/");
     setFilePath(parent);
     loadFiles(activeProject, parent);
+    setPreviewFile(null);
+  };
+
+  const handleProjectUpload = async (files: FileList | null) => {
+    if (!files || !activeProject) return;
+    for (let i = 0; i < files.length; i++) {
+      await api.projectUploadFile(activeProject.id, files[i], filePath || undefined);
+    }
+    loadFiles(activeProject, filePath);
+  };
+
+  const handleProjectMkdir = async () => {
+    if (!mkdirName.trim() || !activeProject) return;
+    await api.projectMkdir(activeProject.id, mkdirName.trim(), filePath || undefined);
+    setMkdirName("");
+    setMkdirOpen(false);
+    loadFiles(activeProject, filePath);
+  };
+
+  const handleProjectDelete = async (entry: FileEntry) => {
+    if (!activeProject) return;
+    if (!confirm(`Delete "${entry.name}"?`)) return;
+    await api.projectDeleteFile(activeProject.id, entry.path);
+    if (previewFile) setPreviewFile(null);
+    loadFiles(activeProject, filePath);
   };
 
   const formatSize = (bytes: number) => {
@@ -792,7 +899,7 @@ export default function ProjectsPage() {
               ))}
             </div>
 
-            <div className={`project-tab-content ${tab === "chat" ? "chat-tab-active" : ""}`}>
+            <div className={`project-tab-content ${tab === "chat" ? "chat-tab-active" : ""} ${tab === "files" ? "files-tab-active" : ""}`}>
               {tab === "chat" && (
                 <ProjectChat project={activeProject} allSkills={allSkills} />
               )}
@@ -914,35 +1021,103 @@ export default function ProjectsPage() {
               )}
 
               {tab === "files" && (
-                <div className="project-files">
-                  <div className="files-header">
-                    <h3>Working Folder</h3>
-                    {activeProject.workingFolder && <span className="hint">{activeProject.workingFolder}</span>}
-                  </div>
-                  {!activeProject.workingFolder ? (
-                    <div className="projects-empty">
-                      <p>No working folder set.</p>
-                      <button className="btn btn-ghost btn-sm" onClick={startEdit}>Set working folder</button>
+                <div className="project-files-layout">
+                  <div className="project-files">
+                    <div className="files-header">
+                      <h3>Working Folder</h3>
+                      {activeProject.workingFolder && <span className="hint">{activeProject.workingFolder}</span>}
                     </div>
-                  ) : (
-                    <>
-                      {filePath && (
-                        <div className="files-breadcrumb">
-                          <button className="btn btn-ghost btn-sm" onClick={navigateUp}>&larr; Back</button>
-                          <span className="hint">/{filePath}</span>
-                        </div>
-                      )}
-                      <div className="project-file-list">
-                        {projectFiles.map((f) => (
-                          <div key={f.path} className="project-file-item" onClick={() => navigateFile(f)}>
-                            <span className="file-icon">{f.isDirectory ? "📁" : "📄"}</span>
-                            <span className="file-name">{f.name}</span>
-                            {!f.isDirectory && <span className="file-size">{formatSize(f.size)}</span>}
-                          </div>
-                        ))}
-                        {projectFiles.length === 0 && <div className="projects-empty">Folder is empty</div>}
+                    {!activeProject.workingFolder ? (
+                      <div className="projects-empty">
+                        <p>No working folder set.</p>
+                        <button className="btn btn-ghost btn-sm" onClick={startEdit}>Set working folder</button>
                       </div>
-                    </>
+                    ) : (
+                      <>
+                        {/* Toolbar */}
+                        <div className="files-toolbar">
+                          <div className="files-toolbar-left">
+                            {filePath && (
+                              <button className="btn btn-ghost btn-sm" onClick={navigateUp}>&larr; Back</button>
+                            )}
+                            <span className="files-path-label">/{filePath || ""}</span>
+                          </div>
+                          <div className="files-toolbar-right">
+                            <button className="btn btn-ghost btn-sm" onClick={() => setMkdirOpen(!mkdirOpen)} title="New folder">
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20 6h-8l-2-2H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm0 12H4V8h16v10zM11 13h2v-2h2v2h2v2h-2v2h-2v-2h-2z"/></svg>
+                              New Folder
+                            </button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => fileInputRef.current?.click()} title="Upload files">
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/></svg>
+                              Upload
+                            </button>
+                            <input
+                              ref={fileInputRef}
+                              type="file"
+                              multiple
+                              style={{ display: "none" }}
+                              onChange={(e) => { handleProjectUpload(e.target.files); e.target.value = ""; }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Mkdir inline form */}
+                        {mkdirOpen && (
+                          <div className="files-mkdir-form">
+                            <input
+                              placeholder="Folder name"
+                              value={mkdirName}
+                              onChange={(e) => setMkdirName(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter") handleProjectMkdir(); if (e.key === "Escape") setMkdirOpen(false); }}
+                              autoFocus
+                            />
+                            <button className="btn btn-primary btn-sm" onClick={handleProjectMkdir} disabled={!mkdirName.trim()}>Create</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => { setMkdirOpen(false); setMkdirName(""); }}>Cancel</button>
+                          </div>
+                        )}
+
+                        {/* File list */}
+                        <div className="project-file-list">
+                          {projectFiles.map((f) => (
+                            <div
+                              key={f.path}
+                              className={`project-file-item ${!f.isDirectory && previewFile ? "clickable" : ""}`}
+                              onClick={() => f.isDirectory ? navigateFile(f) : clickFile(f)}
+                            >
+                              <span className="file-icon">{f.isDirectory ? "📁" : "📄"}</span>
+                              <span className="file-name">{f.name}</span>
+                              {!f.isDirectory && <span className="file-size">{formatSize(f.size)}</span>}
+                              <div className="file-actions" onClick={(e) => e.stopPropagation()}>
+                                {!f.isDirectory && (
+                                  <a href={api.projectDownloadUrl(activeProject.id, f.path)} download className="file-action-btn" title="Download">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                                  </a>
+                                )}
+                                <button className="file-action-btn delete" onClick={() => handleProjectDelete(f)} title="Delete">
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                          {projectFiles.length === 0 && <div className="projects-empty">Folder is empty</div>}
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* File Preview Panel */}
+                  {previewFile && (
+                    <div className="project-file-preview">
+                      <div className="preview-header">
+                        <span className="preview-filename">{previewFile.split("/").pop()}</span>
+                        <button className="btn-icon btn-ghost" onClick={() => setPreviewFile(null)}>
+                          <Icon name="close" />
+                        </button>
+                      </div>
+                      <div className="preview-content">
+                        <OutputCanvas files={[previewFile]} />
+                      </div>
+                    </div>
                   )}
                 </div>
               )}

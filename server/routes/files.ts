@@ -6,6 +6,7 @@ import fs from "fs";
 import mammoth from "mammoth";
 // @ts-ignore
 import pdfParse from "pdf-parse";
+import * as XLSX from "xlsx";
 
 export const filesRouter = Router();
 
@@ -151,6 +152,19 @@ filesRouter.get("/preview", async (req, res) => {
       const buffer = fs.readFileSync(resolved);
       const result = await mammoth.convertToHtml({ buffer });
       res.json({ type: "docx", html: result.value });
+    } else if (ext === ".xlsx" || ext === ".xls") {
+      const buffer = fs.readFileSync(resolved);
+      const workbook = XLSX.read(buffer, { type: "buffer" });
+      const sheetsHtml: string[] = [];
+      for (const sheetName of workbook.SheetNames) {
+        const sheet = workbook.Sheets[sheetName];
+        const html = XLSX.utils.sheet_to_html(sheet, { editable: false });
+        sheetsHtml.push(`<h3 style="margin:12px 0 6px;font-size:14px;">${sheetName}</h3>${html}`);
+      }
+      res.json({ type: "excel", sheets: workbook.SheetNames.length, html: sheetsHtml.join("") });
+    } else if (ext === ".md") {
+      const content = fs.readFileSync(resolved, "utf-8");
+      res.json({ type: "markdown", html: content });
     } else {
       res.status(400).json({ error: "Unsupported file type for preview" });
     }
