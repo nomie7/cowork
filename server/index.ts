@@ -110,13 +110,13 @@ app.use("/api/agents", agentsRouter);
 
 // Serve sandbox files for preview — protected by file token or access token
 app.use("/sandbox", (req, res, next) => {
+  // If no access token configured, app is open — allow all sandbox access
+  if (!ACCESS_TOKEN) return next();
   const fileToken = (req.query.token as string) || req.headers.authorization?.replace("Bearer ", "");
   // Allow if valid file token
   if (fileToken && isValidFileToken(fileToken)) return next();
-  // Also allow if valid access token (for authenticated users)
-  if (ACCESS_TOKEN && fileToken === ACCESS_TOKEN) return next();
-  // If no access token configured AND no file tokens, allow (backwards compat)
-  if (!ACCESS_TOKEN && getFileTokens().length === 0) return next();
+  // Allow if valid access token (for authenticated users)
+  if (fileToken === ACCESS_TOKEN) return next();
   return res.status(401).json({ error: "Unauthorized — invalid or missing file access token" });
 }, express.static(SANDBOX_DIR));
 
