@@ -1,6 +1,6 @@
 ![Tiger Cowork Banner](picture/tigerbanner.jpg)
 
-# Tiger Cowork v0.2.2
+# Tiger Cowork v0.2.3
 
 ## Quick Start (No coding required)
 
@@ -27,6 +27,15 @@ The installer will automatically:
 - Download Tiger Cowork
 - Build and start the app
 - Open your browser at `http://localhost:3001`
+
+### Prerequisites
+
+Before installing, download and install **Docker Desktop** for your system:
+
+- **Mac:** [Download Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/)
+- **Windows:** [Download Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/)
+
+Install Docker Desktop and make sure it is running before proceeding.
 
 ### After Installation
 
