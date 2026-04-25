@@ -1,8 +1,13 @@
 ![Tiger CoWork Banner](picture/screen_read.png)
 
-# Tiger CoWork v0.6.1
+# Tiger CoWork v0.7.0
 
 A self-hosted AI workspace with chat, code execution, parallel multi-agent orchestration, cross-machine agent connection, and a skill marketplace. Mix different AI providers in the same agent team — OpenAI-compatible APIs, Claude Code CLI, and Codex CLI. Connect agents across machines on your network so distributed teams can collaborate in real time. Connect external MCP servers to extend the AI's toolbox. Built with 16 built-in tools and designed for long-running sessions with smart context compression and checkpoint recovery.
+
+## What's New in v0.7.0
+
+- **Automatic Skill Generation** — successful chats are mined on a cron (or via **Run Now**) to synthesise reusable `SKILL.md` workflows. The synthesiser proposes new skills or refines existing auto-generated ones; updates land as a side-by-side `SKILL.md.proposed` diff for review before going live. See [Automatic Skill Generation](#automatic-skill-generation) for the full algorithm and settings.
+- **Skill Approval Workflow** — pending auto skills surface in the Skills page with an Approve/Reject control. Approval renames the proposed file to `SKILL.md` and enables it; the next user turn in any chat picks it up automatically (the system prompt is rebuilt per turn — no restart needed).
 
 ## What's New in v0.6.1
 
@@ -41,6 +46,7 @@ A self-hosted AI workspace with chat, code execution, parallel multi-agent orche
 - **MCP Integration** — connect any Model Context Protocol server (Stdio, SSE, StreamableHTTP)
 - **Output Panel** — renders React components, charts, HTML, PDF, Word, Excel, images, and Markdown
 - **Skills & ClawHub** — install AI skills from the marketplace or build your own
+- **Automatic Skill Generation** — distil successful chats into reusable `SKILL.md` procedures with an LLM synthesiser, approval gate, and proposed-diff review
 - **Projects** — dedicated workspaces with memory, skill selection, and file browser
 
 ## Installation
@@ -118,6 +124,48 @@ npm run build && npm start   # → http://localhost:3001
 2. Go to **Settings** → enter your API Key, API URL, and Model
 3. Click **Test Connection** to verify
 4. Start chatting — the AI can search the web, run code, generate charts, and more
+
+## Automatic Skill Generation
+
+Tiger CoWork can automatically synthesise reusable `SKILL.md` workflows from your past chat sessions. After a chat finishes, an LLM-driven synthesiser reviews recent conversations and proposes either a brand-new skill or a refinement of an existing auto-generated one — so future chats can match a stored procedure instead of re-improvising from scratch.
+
+### How it works
+
+1. **Schedule.** A cron job (default 60 min, configurable) wakes the synthesiser. You can also fire it manually from the Skills page (**Run Auto-Update Now**).
+2. **Candidate selection.** Sessions whose `updatedAt` is newer than the saved cursor are summarised: first 6 user prompts (≤600 chars each) plus the last assistant reply (≤3000 chars). Sessions whose final reply looks like an error (rate limit, missing API key, connection error) are silently dropped.
+3. **Synthesis.** The configured TigerBot model receives the candidates plus the current skill list and returns strict JSON proposals. Each is either:
+   - `create` — a new skill (must not collide with any existing name across all sources), or
+   - `update` — refines an existing skill **only if** its `source: "auto"`. Human-curated skills (`custom`, `clawhub`, `claude`, `openclaw`) are write-protected.
+4. **Validation.** Each proposal must pass a regex-clean name (`[a-zA-Z0-9_-]+`, ≤64 chars), valid YAML frontmatter, content under 100k chars, and source/collision checks.
+5. **Apply.**
+   - **Create** → writes `skills/<slug>/SKILL.md` and a registry row in `data/skills.json` with `source: "auto"`.
+   - **Update** → writes `skills/<slug>/SKILL.md.proposed` next to the live file, leaving the live `SKILL.md` untouched until you approve.
+6. **Approval gate.** When `skillAutoUpdateRequireApproval` is `true` (the default), proposals land with `enabled: false, reviewStatus: "pending"` until you approve them from the Skills page. Approval renames `.proposed` → `SKILL.md` and flips `enabled: true`. Set it to `false` to auto-enable everything.
+7. **Cursor advance.** On a successful run the cursor moves to the newest considered session, so the next tick only looks at chats that have happened since. If the synthesiser LLM errors (e.g. 429), the cursor does **not** advance — those candidates remain eligible.
+
+### Settings (in `data/settings.json`)
+
+| Key | Default | Purpose |
+|---|---|---|
+| `skillAutoUpdateEnabled` | `true` | Master on/off switch |
+| `skillAutoUpdateIntervalMinutes` | `60` | Cron interval (clamped to [5, 1440]) |
+| `skillAutoUpdateMaxCandidates` | `30` | Cap on sessions summarised per run (newest N kept) |
+| `skillAutoUpdateRequireApproval` | `true` | Gate new/updated skills behind manual approval |
+| `skillAutoUpdateCursor` | epoch | High-water mark of newest processed session |
+| `skillAutoUpdateLastRunAt` / `LastRunSummary` | — | Telemetry surfaced in the Skills UI |
+
+### REST endpoints
+
+- `POST /api/skills/auto/run-now` — trigger synthesis immediately
+- `POST /api/skills/:id/approve` — accept a pending `create` or `update`
+- `POST /api/skills/:id/reject` — drop a pending proposal (deletes the folder for a `create`, deletes only `.proposed` for an `update`)
+- `GET  /api/skills/:id/proposed-diff` — return current vs. proposed `SKILL.md` for review
+
+### When does a new skill become callable?
+
+Skills are advertised to the model by `buildSystemPrompt`, which re-scans the skills directory and registry on every user message — so once a skill is `enabled: true`, the **next** user turn in any chat sees it. No server restart needed.
+
+A skill **cannot** be applied within the same chat that produced it: synthesis only runs after a session settles, and that session is the synthesiser's input, not its consumer. The earliest a skill distilled from chat A can be invoked is the next user turn that follows the next cron tick (and approval click, if required).
 
 ## Documentation
 
