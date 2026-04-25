@@ -306,6 +306,7 @@ export default function SettingsPage() {
                     minimax: { url: "https://api.minimax.io/v1", model: "MiniMax-M2.7" },
                     google_ai_studio: { url: "https://generativelanguage.googleapis.com/v1beta/openai/", model: "gemini-3-flash-preview" },
                     kimi: { url: "https://api.kimi.com/coding/v1", model: "kimi-k2-0905-preview" },
+                    deepseek: { url: "https://api.deepseek.com/v1", model: "deepseek-chat" },
                   };
                   // Check custom providers for defaults
                   const customProviders: Array<{ id: string; name: string; url: string; model: string }> = settings.customProviders || [];
@@ -324,13 +325,14 @@ export default function SettingsPage() {
                 <option value="minimax">MiniMax</option>
                 <option value="google_ai_studio">Google AI Studio</option>
                 <option value="kimi">Kimi (Moonshot)</option>
+                <option value="deepseek">DeepSeek</option>
                 {(settings.customProviders || []).map((p: any) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
               <button className="btn btn-secondary" style={{ whiteSpace: "nowrap" }} onClick={() => setShowAddProvider(true)}>+ Add</button>
               {/* Show remove button only for custom providers */}
-              {!(["openrouter", "zai", "anthropic_claude_code", "minimax", "google_ai_studio", "kimi"].includes(settings.aiProvider || "openrouter")) && (
+              {!(["openrouter", "zai", "anthropic_claude_code", "minimax", "google_ai_studio", "kimi", "deepseek"].includes(settings.aiProvider || "openrouter")) && (
                 <button className="btn btn-danger" style={{ whiteSpace: "nowrap" }} onClick={() => {
                   if (!confirm(`Remove provider "${(settings.customProviders || []).find((p: any) => p.id === settings.aiProvider)?.name || settings.aiProvider}"?`)) return;
                   const customProviders = (settings.customProviders || []).filter((p: any) => p.id !== settings.aiProvider);
@@ -366,7 +368,7 @@ export default function SettingsPage() {
                   if (!newProviderName.trim()) return;
                   const id = newProviderName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
                   const customProviders = [...(settings.customProviders || [])];
-                  if (customProviders.some((p: any) => p.id === id) || ["openrouter", "zai", "anthropic_claude_code"].includes(id)) return;
+                  if (customProviders.some((p: any) => p.id === id) || ["openrouter", "zai", "anthropic_claude_code", "minimax", "google_ai_studio", "kimi", "deepseek"].includes(id)) return;
                   customProviders.push({ id, name: newProviderName.trim(), url: newProviderUrl.trim(), model: newProviderModel.trim() });
                   // Switch to the new provider immediately
                   const s: any = { ...settings, customProviders };

@@ -9,6 +9,7 @@ interface ChatMessage {
   content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>;
   tool_calls?: any[];
   tool_call_id?: string;
+  reasoning_content?: string;
 }
 
 /**
@@ -1463,6 +1464,7 @@ export async function callTigerBotWithTools(
       role: "assistant",
       content: message.content || "",
       tool_calls: truncatedToolCalls,
+      ...(message.reasoning_content ? { reasoning_content: message.reasoning_content } : {}),
     });
 
     // Stream the agent's reasoning text to the callback (for chat log capture)

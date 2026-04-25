@@ -186,16 +186,19 @@ export async function buildSystemPrompt(filterSkillIds?: string[], options?: { i
     .filter((s) => s.enabled && !clawhubSkills.includes(s.name) && !customSkills.some((cs) => cs.name === s.name))
     .map((s) => `${s.name} (${s.source})`);
 
-  // If project has specific skill selections, filter to only those
+  // If project has specific skill selections, filter to only those.
+  // filterSkillIds may contain either skill IDs (from project.skills) or names;
+  // resolve both forms to a set of allowed names before filtering directory-scanned skills.
   if (filterSkillIds && filterSkillIds.length > 0) {
-    clawhubSkills = clawhubSkills.filter((name) => filterSkillIds.includes(name));
-    customSkills = customSkills.filter((cs) => filterSkillIds.includes(cs.name));
-    const allSkills = await getSkills();
-    const selectedSkillNames = allSkills.filter((s) => filterSkillIds.includes(s.id)).map((s) => s.name);
-    registeredSkills = registeredSkills.filter((rs) => {
-      const name = rs.split(" (")[0];
-      return selectedSkillNames.includes(name) || filterSkillIds.includes(name);
-    });
+    const idToName = new Map(allSkillRecords.map((s) => [s.id, s.name]));
+    const allowedNames = new Set<string>();
+    for (const key of filterSkillIds) {
+      if (idToName.has(key)) allowedNames.add(idToName.get(key)!);
+      else allowedNames.add(key);
+    }
+    clawhubSkills = clawhubSkills.filter((name) => allowedNames.has(name));
+    customSkills = customSkills.filter((cs) => allowedNames.has(cs.name));
+    registeredSkills = registeredSkills.filter((rs) => allowedNames.has(rs.split(" (")[0]));
   }
 
   let skillsList = "";
@@ -1126,6 +1129,19 @@ img.save('${tmpOut}', 'JPEG', quality=80)
             if (!activeTask.agentTools["Orchestrator"]) activeTask.agentTools["Orchestrator"] = [];
             pushToolCapped(activeTask.agentTools["Orchestrator"], name);
             activeTask.lastUpdate = new Date().toISOString();
+            // Mirror orchestrator's own tool calls into the activity log so the
+            // Activity panel isn't silent when the orchestrator handles work
+            // directly (i.e., doesn't delegate to a sub-agent).
+            if (name.startsWith("proto_")) {
+              const protoName = name.replace("proto_", "").split("_")[0].toUpperCase();
+              appendSessionProgress(sessionId, `> <span class="proto-tag proto-${protoName.toLowerCase()}">${protoName}</span> **Orchestrator** → \`${name}\`\n`);
+            } else if (name === "send_task") {
+              appendSessionProgress(sessionId, `> **📤 Orchestrator** delegating task to ${args?.to || "agent"}\n`);
+            } else if (name === "wait_result") {
+              appendSessionProgress(sessionId, `> **⏳ Orchestrator** waiting for ${args?.from || "agent"}\n`);
+            } else {
+              appendSessionProgress(sessionId, `> **⚙️ Orchestrator** → \`${name}\`\n`);
+            }
           },
           // onToolResult — collect output files, show status only
           (name, toolResult) => {
@@ -1904,6 +1920,16 @@ img.save('${tmpOut}', 'JPEG', quality=80)
             if (!activeTask.agentTools["Orchestrator"]) activeTask.agentTools["Orchestrator"] = [];
             pushToolCapped(activeTask.agentTools["Orchestrator"], name);
             activeTask.lastUpdate = new Date().toISOString();
+            if (name.startsWith("proto_")) {
+              const protoName = name.replace("proto_", "").split("_")[0].toUpperCase();
+              appendSessionProgress(sessionId, `> <span class="proto-tag proto-${protoName.toLowerCase()}">${protoName}</span> **Orchestrator** → \`${name}\`\n`);
+            } else if (name === "send_task") {
+              appendSessionProgress(sessionId, `> **📤 Orchestrator** delegating task to ${args?.to || "agent"}\n`);
+            } else if (name === "wait_result") {
+              appendSessionProgress(sessionId, `> **⏳ Orchestrator** waiting for ${args?.from || "agent"}\n`);
+            } else {
+              appendSessionProgress(sessionId, `> **⚙️ Orchestrator** → \`${name}\`\n`);
+            }
           },
           (name, toolResult) => {
             const extra: any = {};

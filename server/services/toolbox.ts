@@ -1167,6 +1167,51 @@ async function listFilesTool(args: { path?: string; recursive?: boolean }): Prom
 
 const SKILLS_DIR = path.resolve("Tiger_bot/skills");
 const CUSTOM_SKILLS_DIR = path.resolve("skills");
+const SKILLS_REGISTRY_FILE = path.resolve("data/skills.json");
+
+function slugifySkillName(name: string): string {
+  return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function skillCandidates(skillName: string, registryEntry?: any): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (v?: string) => {
+    if (!v) return;
+    if (seen.has(v)) return;
+    seen.add(v);
+    out.push(v);
+  };
+  push(skillName);
+  push(registryEntry?.script);
+  push(slugifySkillName(skillName));
+  return out;
+}
+
+function resolveSkillDir(skillName: string, registryEntry?: any): { dir: string; source: string } | null {
+  const searchDirs: { dir: string; label: string }[] = [
+    { dir: SKILLS_DIR, label: "clawhub" },
+    { dir: CUSTOM_SKILLS_DIR, label: "custom" },
+  ];
+  for (const cand of skillCandidates(skillName, registryEntry)) {
+    for (const { dir, label } of searchDirs) {
+      const base = path.join(dir, cand);
+      if (fs.existsSync(path.join(base, "SKILL.md"))) {
+        return { dir: base, source: label };
+      }
+    }
+  }
+  return null;
+}
+
+function readSkillsRegistry(): any[] {
+  try {
+    if (fs.existsSync(SKILLS_REGISTRY_FILE)) {
+      return JSON.parse(fs.readFileSync(SKILLS_REGISTRY_FILE, "utf8"));
+    }
+  } catch {}
+  return [];
+}
 
 function listSkillsTool(): any {
   // ClawHub skills
@@ -1198,14 +1243,17 @@ function listSkillsTool(): any {
   }
 
   // Registered skills from data/skills.json
-  let registeredSkills: { name: string; source: string; enabled: boolean }[] = [];
-  try {
-    const skillsFile = path.resolve("data/skills.json");
-    if (fs.existsSync(skillsFile)) {
-      const skills = JSON.parse(fs.readFileSync(skillsFile, "utf8"));
-      registeredSkills = skills.map((s: any) => ({ name: s.name, source: s.source, enabled: s.enabled }));
-    }
-  } catch {}
+  const registeredSkills: { name: string; source: string; enabled: boolean; hasFiles: boolean; resolvedDir?: string }[] = [];
+  for (const s of readSkillsRegistry()) {
+    const resolved = resolveSkillDir(s.name, s);
+    registeredSkills.push({
+      name: s.name,
+      source: s.source,
+      enabled: s.enabled,
+      hasFiles: resolved !== null,
+      ...(resolved ? { resolvedDir: resolved.dir } : {}),
+    });
+  }
 
   return {
     clawhub_skills: clawhubSkills,
@@ -1213,7 +1261,7 @@ function listSkillsTool(): any {
     registered_skills: registeredSkills,
     clawhub_dir: SKILLS_DIR,
     custom_dir: CUSTOM_SKILLS_DIR,
-    hint: "Use load_skill with a skill name to see its SKILL.md and supporting files. Works for both ClawHub and custom skills.",
+    hint: "Use load_skill with a skill name to see its SKILL.md and supporting files. Skills where hasFiles=false are registered but have no SKILL.md on disk and cannot be loaded.",
   };
 }
 
@@ -1221,57 +1269,66 @@ function loadSkillTool(args: { skill: string }): any {
   const skillName = args.skill.trim();
   if (!skillName) return { ok: false, error: "Missing skill name" };
 
-  // Search in both ClawHub and custom skills directories
-  const searchDirs = [
-    { dir: SKILLS_DIR, label: "clawhub" },
-    { dir: CUSTOM_SKILLS_DIR, label: "custom" },
-  ];
+  const registry = readSkillsRegistry();
+  const registryEntry = registry.find((s: any) => s.name === skillName)
+    ?? registry.find((s: any) => slugifySkillName(s.name) === slugifySkillName(skillName));
 
-  for (const { dir, label } of searchDirs) {
-    const skillBaseDir = path.join(dir, skillName);
+  const resolved = resolveSkillDir(skillName, registryEntry);
+  if (resolved) {
+    const skillBaseDir = resolved.dir;
     const skillFile = path.join(skillBaseDir, "SKILL.md");
-    if (fs.existsSync(skillFile)) {
-      const content = fs.readFileSync(skillFile, "utf8").replace(/\{baseDir\}/g, skillBaseDir);
+    const content = fs.readFileSync(skillFile, "utf8").replace(/\{baseDir\}/g, skillBaseDir);
 
-      // Collect metadata
-      let meta: any = {};
-      const metaFile = path.join(skillBaseDir, "_meta.json");
-      if (fs.existsSync(metaFile)) {
-        try { meta = JSON.parse(fs.readFileSync(metaFile, "utf8")); } catch {}
-      }
-
-      // List all supporting files in the skill folder (recursive)
-      const supportingFiles: string[] = [];
-      const walkSkillDir = (d: string, prefix: string) => {
-        try {
-          const entries = fs.readdirSync(d, { withFileTypes: true });
-          for (const e of entries) {
-            if (e.name.startsWith(".") || e.name === "__MACOSX") continue;
-            const rel = prefix ? `${prefix}/${e.name}` : e.name;
-            if (e.isDirectory()) {
-              walkSkillDir(path.join(d, e.name), rel);
-            } else if (e.name !== "SKILL.md" && e.name !== "_meta.json") {
-              supportingFiles.push(rel);
-            }
-          }
-        } catch {}
-      };
-      walkSkillDir(skillBaseDir, "");
-
-      return {
-        ok: true,
-        skill: skillName,
-        source: label,
-        skillDir: skillBaseDir,
-        content: content.slice(0, 15000),
-        meta,
-        supportingFiles,
-        truncated: content.length > 15000,
-      };
+    let meta: any = {};
+    const metaFile = path.join(skillBaseDir, "_meta.json");
+    if (fs.existsSync(metaFile)) {
+      try { meta = JSON.parse(fs.readFileSync(metaFile, "utf8")); } catch {}
     }
+
+    const supportingFiles: string[] = [];
+    const walkSkillDir = (d: string, prefix: string) => {
+      try {
+        const entries = fs.readdirSync(d, { withFileTypes: true });
+        for (const e of entries) {
+          if (e.name.startsWith(".") || e.name === "__MACOSX") continue;
+          const rel = prefix ? `${prefix}/${e.name}` : e.name;
+          if (e.isDirectory()) {
+            walkSkillDir(path.join(d, e.name), rel);
+          } else if (e.name !== "SKILL.md" && e.name !== "_meta.json") {
+            supportingFiles.push(rel);
+          }
+        }
+      } catch {}
+    };
+    walkSkillDir(skillBaseDir, "");
+
+    return {
+      ok: true,
+      skill: skillName,
+      source: resolved.source,
+      skillDir: skillBaseDir,
+      content: content.slice(0, 15000),
+      meta,
+      supportingFiles,
+      truncated: content.length > 15000,
+    };
   }
 
-  return { ok: false, error: `Skill "${skillName}" not found in ${SKILLS_DIR} or ${CUSTOM_SKILLS_DIR}` };
+  const tried = skillCandidates(skillName, registryEntry);
+  if (registryEntry) {
+    return {
+      ok: false,
+      error: `Skill "${skillName}" is registered in data/skills.json but no SKILL.md was found on disk. Tried folder names [${tried.join(", ")}] under ${SKILLS_DIR} and ${CUSTOM_SKILLS_DIR}. Create SKILL.md at one of these paths, or re-install the skill so its files are unpacked.`,
+      registered: true,
+      triedCandidates: tried,
+    };
+  }
+  return {
+    ok: false,
+    error: `Skill "${skillName}" not found. Tried folder names [${tried.join(", ")}] under ${SKILLS_DIR} and ${CUSTOM_SKILLS_DIR}.`,
+    registered: false,
+    triedCandidates: tried,
+  };
 }
 
 async function clawhubSearchTool(args: { query: string; limit?: number }): Promise<any> {
@@ -1555,7 +1612,7 @@ export async function runClaudeCodeAgent(
       if (opts.signal.aborted) {
         child.kill("SIGTERM");
         clearTimeout(timeoutId);
-        return resolve({ content: "Task was cancelled.", toolCalls });
+        return resolve({ content: resultText || "Task was cancelled.", toolCalls });
       }
       opts.signal.addEventListener("abort", onAbort, { once: true });
     }
@@ -1734,7 +1791,7 @@ export async function runCodexAgent(
       if (opts.signal.aborted) {
         child.kill("SIGTERM");
         clearTimeout(timeoutId);
-        return resolve({ content: "Task was cancelled.", toolCalls });
+        return resolve({ content: resultText || "Task was cancelled.", toolCalls });
       }
       opts.signal.addEventListener("abort", onAbort, { once: true });
     }

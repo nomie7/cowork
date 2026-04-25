@@ -19,8 +19,13 @@ import { callTigerBotWithTools } from "../services/tigerbot";
 
 const CHAT_LOG_DIR = path.resolve("data", "chat_logs");
 try { if (!fs.existsSync(CHAT_LOG_DIR)) fs.mkdirSync(CHAT_LOG_DIR, { recursive: true }); } catch {}
+const ACTIVITY_LOG_DIR = path.resolve("data", "activity_logs");
+try { if (!fs.existsSync(ACTIVITY_LOG_DIR)) fs.mkdirSync(ACTIVITY_LOG_DIR, { recursive: true }); } catch {}
 function appendChatLog(sessionId: string, text: string) {
   try { fs.appendFileSync(path.join(CHAT_LOG_DIR, `${sessionId}.log`), text); } catch {}
+}
+function appendActivityLog(sessionId: string, text: string) {
+  try { fs.appendFileSync(path.join(ACTIVITY_LOG_DIR, `${sessionId}.log`), text); } catch {}
 }
 function chatLogTimestamp(): string {
   return new Date().toISOString().replace("T", " ").slice(0, 19);
@@ -35,7 +40,7 @@ import {
   getHumanConnectedAgents,
   getWorkingAgents,
 } from "../services/toolbox";
-import { busPublish, busWaitForMessage } from "../services/protocols";
+import { busPublish, busWaitForMessage, busDestroy, busGet } from "../services/protocols";
 import { buildSystemPrompt } from "../services/socket";
 
 interface RemoteTaskEntry {
@@ -276,6 +281,9 @@ async function processRemoteTask(
           // Mirror to chat log
           const argsStr = args ? `\n${JSON.stringify(args, null, 2).slice(0, 600)}` : "";
           appendChatLog(sessionId, `\n[${chatLogTimestamp()}] TOOL_CALL: ${name}${argsStr}\n`);
+          // Mirror to activity log so the Activity panel shows orchestrator's
+          // own tool use in solo (no sub-agent) mode.
+          appendActivityLog(sessionId, `> **⚙️ Orchestrator** → \`${name}\`${hint}\n`);
         },
         (name, res) => {
           // Send concise result status: success/fail + short info
@@ -301,6 +309,16 @@ async function processRemoteTask(
       );
       clearInterval(heartbeat);
       if (entry.killed) return;
+
+      // Detect internal cancellations that tigerbot returns as normal content
+      const contentLower = (result.content || "").trim().toLowerCase();
+      if (contentLower === "task was cancelled." || contentLower === "task was cancelled") {
+        entry.status = "error";
+        entry.error = "Agent was cancelled internally";
+        addProgress(entry, "Error: agent was cancelled internally");
+        return;
+      }
+
       entry.result = result.content;
       entry.status = "completed";
       addProgress(entry, "Completed");
@@ -447,10 +465,22 @@ async function processRemoteTask(
   let finalResult: string | null = null;
   let finalError: string | null = null;
 
+  const isCancelledResult = (r: string) => {
+    const lower = r.trim().toLowerCase();
+    return lower === "task was cancelled." || lower === "task was cancelled" || lower === "(no result)";
+  };
+
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const resultMsg = await busWaitForMessage(sessionId, waitTopic, timeout, abortController.signal);
-      finalResult = resultMsg.payload?.result || "(no result)";
+      const result = resultMsg.payload?.result || "(no result)";
+      // If a stale cancellation message slipped through (race with dying
+      // agents), treat it as a timeout so the retry logic handles it.
+      if (isCancelledResult(result) && attempt < maxRetries) {
+        addProgress(entry, `Got stale cancellation result — retrying (attempt ${attempt + 2}/${maxRetries + 1})`);
+        throw new Error("busWaitForMessage timeout (stale cancellation)");
+      }
+      finalResult = result;
       break;
     } catch (err: any) {
       if (entry.killed || abortController.signal.aborted) {
@@ -463,12 +493,33 @@ async function processRemoteTask(
           : `Agent error: ${err.message}`;
         break;
       }
-      // Timeout with retries remaining: reset session and re-dispatch.
+      // Timeout with retries remaining — but first check if the agent
+      // finished just after the timeout fired. The result may already be
+      // sitting in the bus, and shutting down would destroy it forever.
+      {
+        const lateResult = busGet(sessionId).consumeFromHistory(waitTopic);
+        if (lateResult) {
+          const lr = lateResult.payload?.result || "(no result)";
+          if (!isCancelledResult(lr)) {
+            addProgress(entry, "Agent finished just after timeout — using its answer");
+            finalResult = lr;
+            break;
+          }
+        }
+      }
+      // No real answer yet — reset session and re-dispatch.
       addProgress(
         entry,
         `Agent timed out after ${timeout / 1000}s — re-delegating (attempt ${attempt + 2}/${maxRetries + 1})`,
       );
       try { shutdownRealtimeSession(sessionId); } catch {}
+      // Wait for dying agents to flush their cancellation messages, then
+      // destroy the bus again. Without this, old agents publish "Task was
+      // cancelled." to a newly-created bus after busDestroy runs inside
+      // shutdownRealtimeSession, and the next busWaitForMessage picks it
+      // up immediately as if it were the real result.
+      await new Promise((r) => setTimeout(r, 2000));
+      busDestroy(sessionId);
       entry.activeAgents.clear();
       entry.doneAgents.clear();
       const rt = await startRealtimeSession(sessionId, configFile);
@@ -490,16 +541,24 @@ async function processRemoteTask(
   try {
     if (entry.killed) return;
     if (finalResult !== null) {
-      entry.result = finalResult;
-      entry.status = "completed";
-      addProgress(entry, "Completed (realtime agents)");
+      // Detect internal cancellations or empty results from agents
+      const resultLower = finalResult.trim().toLowerCase();
+      if (resultLower === "task was cancelled." || resultLower === "task was cancelled" || resultLower === "(no result)") {
+        entry.status = "error";
+        entry.error = `Agent returned no usable result: ${finalResult}`;
+        addProgress(entry, `Error: ${entry.error}`);
+      } else {
+        entry.result = finalResult;
+        entry.status = "completed";
+        addProgress(entry, "Completed (realtime agents)");
 
-      const sessions = await getChatHistory();
-      const session = sessions.find((s) => s.id === sessionId);
-      if (session) {
-        session.messages.push({ role: "assistant", content: finalResult, timestamp: new Date().toISOString() });
-        session.updatedAt = new Date().toISOString();
-        await saveChatHistory(sessions);
+        const sessions = await getChatHistory();
+        const session = sessions.find((s) => s.id === sessionId);
+        if (session) {
+          session.messages.push({ role: "assistant", content: finalResult, timestamp: new Date().toISOString() });
+          session.updatedAt = new Date().toISOString();
+          await saveChatHistory(sessions);
+        }
       }
     } else {
       entry.status = "error";

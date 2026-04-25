@@ -1,21 +1,38 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import * as Recharts from "recharts";
 
 interface Props {
   src: string; // URL to the compiled .jsx.js file
 }
 
+// Drop transient cache-bust params ("t") so repeated parent renders with a
+// fresh Date.now() don't re-trigger the fetch/compile loop. The file path
+// change (adding/removing a .jsx.js) still invalidates this key.
+function stableSrcKey(src: string): string {
+  try {
+    const u = new URL(src, window.location.origin);
+    u.searchParams.delete("t");
+    return u.pathname + (u.search || "");
+  } catch {
+    return src.split("&t=")[0].split("?t=")[0];
+  }
+}
+
 export default function ReactComponentRenderer({ src }: Props) {
   const [Component, setComponent] = useState<React.ComponentType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
+  const srcRef = useRef(src);
+  srcRef.current = src;
+
+  const cacheKey = useMemo(() => stableSrcKey(src), [src]);
 
   useEffect(() => {
     mountedRef.current = true;
     setError(null);
     setComponent(null);
 
-    fetch(src)
+    fetch(srcRef.current)
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
         return res.text();
@@ -43,7 +60,7 @@ export default function ReactComponentRenderer({ src }: Props) {
     return () => {
       mountedRef.current = false;
     };
-  }, [src]);
+  }, [cacheKey]);
 
   if (error) {
     return <div style={{ color: "#e53935", padding: 16, fontFamily: "monospace", whiteSpace: "pre-wrap", fontSize: 13 }}>Error: {error}</div>;
