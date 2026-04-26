@@ -62,14 +62,101 @@ interface FeedbackEntry {
   excerpt?: string;
 }
 
-function summariseSession(s: ChatSession): {
+interface SubagentTrace {
+  label: string;
+  task?: string;
+  toolsUsed: string[];
+  skillsLoaded: string[];
+  completed: boolean;
+  error?: string;
+}
+
+interface SessionSummary {
   sessionId: string;
   title: string;
   updatedAt: string;
   userQueries: string[];
   finalAssistant: string;
   feedback: FeedbackEntry[];
-} | null {
+  subagentWorkflow: SubagentTrace[];
+}
+
+const CHAT_LOG_DIR = path.resolve("data", "chat_logs");
+const CHAT_LOG_TAIL_BYTES = 256 * 1024; // read at most the trailing 256 KB — newest activity is what we care about
+
+async function readChatLogTail(sessionId: string): Promise<string> {
+  const file = path.join(CHAT_LOG_DIR, `${sessionId}.log`);
+  try {
+    const stat = await fs.stat(file);
+    const start = Math.max(0, stat.size - CHAT_LOG_TAIL_BYTES);
+    const length = stat.size - start;
+    if (length <= 0) return "";
+    const fh = await fs.open(file, "r");
+    try {
+      const buf = Buffer.alloc(length);
+      await fh.read(buf, 0, length, start);
+      return buf.toString("utf-8");
+    } finally {
+      await fh.close();
+    }
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Parse the chat-log produced by socket.ts:appendChatLog into a per-agent
+ * trace. Sees both classic spawn_subagent flows (AGENT_SPAWN/DONE) and the
+ * realtime/auto_swarm flows (AGENT_WORKING/COMPLETE). The orchestrator's own
+ * load_skill calls land under the "main" pseudo-label.
+ */
+function parseSubagentWorkflow(log: string): SubagentTrace[] {
+  if (!log) return [];
+  const traces = new Map<string, SubagentTrace>();
+  const ensure = (label: string): SubagentTrace => {
+    let t = traces.get(label);
+    if (!t) {
+      t = { label, toolsUsed: [], skillsLoaded: [], completed: false };
+      traces.set(label, t);
+    }
+    return t;
+  };
+
+  for (const m of log.matchAll(/AGENT_(?:SPAWN|WORKING): ([^\n]+)\n(?:\s+TASK:\s*([^\n]+))?/g)) {
+    const t = ensure(m[1].trim());
+    if (m[2] && !t.task) t.task = m[2].trim().slice(0, 240);
+  }
+  for (const m of log.matchAll(/^\[[^\]]+\]\s+([^\n]+?) → tool: ([^\n]+)$/gm)) {
+    const t = ensure(m[1].trim());
+    const tool = m[2].trim();
+    if (!t.toolsUsed.includes(tool)) t.toolsUsed.push(tool);
+  }
+  // load_skill: TOOL_CALL line carries an optional "(label)" suffix; args block
+  // is JSON.stringify(args, null, 2) so "skill" appears within ~500 chars after.
+  for (const m of log.matchAll(/TOOL_CALL: load_skill(?: \(([^)]+)\))?[\s\S]{0,500}?"skill"\s*:\s*"([^"]+)"/g)) {
+    const t = ensure((m[1] || "main").trim());
+    if (!t.skillsLoaded.includes(m[2])) t.skillsLoaded.push(m[2]);
+    if (!t.toolsUsed.includes("load_skill")) t.toolsUsed.push("load_skill");
+  }
+  for (const m of log.matchAll(/AGENT_(?:DONE|COMPLETE): ([^\n]+)/g)) {
+    const t = traces.get(m[1].trim());
+    if (t) t.completed = true;
+  }
+  for (const m of log.matchAll(/AGENT_ERROR: ([^:\n]+): ([^\n]+)/g)) {
+    ensure(m[1].trim()).error = m[2].trim().slice(0, 200);
+  }
+  return Array.from(traces.values()).filter(
+    (t) => t.toolsUsed.length > 0 || t.skillsLoaded.length > 0 || t.task || t.error,
+  );
+}
+
+function collectLoadedSkills(traces: SubagentTrace[]): string[] {
+  const set = new Set<string>();
+  for (const t of traces) for (const s of t.skillsLoaded) set.add(s);
+  return [...set];
+}
+
+async function summariseSession(s: ChatSession): Promise<SessionSummary | null> {
   const userMsgs = s.messages.filter((m) => m.role === "user");
   const assistantMsgs = s.messages.filter((m) => m.role === "assistant");
   if (userMsgs.length === 0 || assistantMsgs.length === 0) return null;
@@ -88,6 +175,8 @@ function summariseSession(s: ChatSession): {
       excerpt: content.slice(0, 240),
     });
   }
+  const log = await readChatLogTail(s.id);
+  const subagentWorkflow = parseSubagentWorkflow(log);
   return {
     sessionId: s.id,
     title: s.title,
@@ -97,6 +186,7 @@ function summariseSession(s: ChatSession): {
       .map((m) => (typeof m.content === "string" ? m.content : "").slice(0, 600)),
     finalAssistant: lastContent.slice(0, 3000),
     feedback,
+    subagentWorkflow,
   };
 }
 
@@ -117,12 +207,12 @@ async function loadExistingSkillSummaries(): Promise<{ name: string; description
 const EXISTING_SKILL_BODY_BUDGET = 4000;
 
 function buildPrompt(
-  candidates: ReturnType<typeof summariseSession>[],
+  candidates: (SessionSummary | null)[],
   existing: { name: string; description: string; source: string; body?: string }[],
   excludeSessionIds: Set<string> = new Set(),
 ): string {
   const candidatesBlock = candidates
-    .filter((c): c is NonNullable<typeof c> => !!c && !excludeSessionIds.has(c.sessionId))
+    .filter((c): c is SessionSummary => !!c && !excludeSessionIds.has(c.sessionId))
     .map(
       (c, i) => {
         const feedbackBlock = c.feedback.length
@@ -135,9 +225,26 @@ function buildPrompt(
               })
               .join("\n")}`
           : "";
+        const workflowBlock = c.subagentWorkflow.length
+          ? `\nsubagent_workflow (parsed from data/chat_logs/${c.sessionId}.log — invisible in final_assistant_excerpt):\n${c.subagentWorkflow
+              .slice(0, 10)
+              .map((w) => {
+                const parts = [`- ${w.label}`];
+                if (w.task) parts.push(`task="${w.task.replace(/"/g, "'")}"`);
+                if (w.skillsLoaded.length) parts.push(`skills_loaded=[${w.skillsLoaded.join(", ")}]`);
+                if (w.toolsUsed.length) {
+                  const toolsView = w.toolsUsed.slice(0, 8).join(", ") + (w.toolsUsed.length > 8 ? ", …" : "");
+                  parts.push(`tools_used=[${toolsView}]`);
+                }
+                if (w.error) parts.push(`error="${w.error.replace(/"/g, "'")}"`);
+                else if (!w.completed) parts.push(`incomplete`);
+                return parts.join(" | ");
+              })
+              .join("\n")}`
+          : "";
         return `## Session ${i + 1}\nid: ${c.sessionId}\ntitle: ${c.title}\nuser_queries:\n${c.userQueries
           .map((q) => `- ${q.replace(/\n/g, " ")}`)
-          .join("\n")}\nfinal_assistant_excerpt:\n${c.finalAssistant}${feedbackBlock}`;
+          .join("\n")}\nfinal_assistant_excerpt:\n${c.finalAssistant}${workflowBlock}${feedbackBlock}`;
       },
     )
     .join("\n\n---\n\n");
@@ -166,6 +273,7 @@ Rules:
 - If nothing is worth capturing, return {"proposals":[]}.
 - content MUST be a complete SKILL.md including YAML frontmatter (name + description) followed by markdown body. Body <= 100,000 chars.
 - Treat human_feedback as authoritative: 👍 LIKED responses indicate workflows worth capturing or reinforcing; 👎 DISLIKED responses indicate the procedure failed or misled the user — DO NOT distil a skill from those, and if an existing auto-skill produced the disliked behaviour, propose an update that addresses the comment.
+- If subagent_workflow is non-empty, the session ran a multi-agent topology. The final_assistant_excerpt is the orchestrator's merged summary and HIDES which sub-agent did what. Use the workflow block as ground truth for the actual procedure: capture the agent labels, the order they ran, the skills_loaded each used, and any errors. A skill body for a multi-agent workflow should prescribe the topology (which roles to spawn, in what order, with which skills loaded), not just the outcome. If skills_loaded names an existing auto-skill that produced a great result, prefer "update" to refine it over creating a near-duplicate "create".
 
 EXISTING SKILLS:
 ${existingBlock || "(none)"}
@@ -446,7 +554,24 @@ function selectRemediationTarget(
   return best;
 }
 
-function buildRemediationPrompt(skillName: string, currentSkillMd: string, excerpt: string, comment: string): string {
+function buildRemediationPrompt(
+  skillName: string,
+  currentSkillMd: string,
+  excerpt: string,
+  comment: string,
+  workflow: SubagentTrace[] = [],
+): string {
+  const workflowHint = workflow.length
+    ? `\nSUB-AGENT WORKFLOW (parsed from the session's chat log — the orchestrator's reply hides this):\n${workflow
+        .slice(0, 8)
+        .map((w) => {
+          const skills = w.skillsLoaded.length ? ` skills_loaded=[${w.skillsLoaded.join(", ")}]` : "";
+          const tools = w.toolsUsed.length ? ` tools=[${w.toolsUsed.slice(0, 6).join(", ")}]` : "";
+          const status = w.error ? ` ERROR="${w.error.replace(/"/g, "'")}"` : w.completed ? "" : " (incomplete)";
+          return `- ${w.label}${skills}${tools}${status}`;
+        })
+        .join("\n")}\n`
+    : "";
   return `You are fixing an existing SKILL.md because a user marked an assistant response that this skill produced as 👎 NOT HELPFUL and explained why.
 
 Your job: rewrite the skill so the same failure does not recur. Preserve everything that still works. Address the user's complaint directly — change procedures, add a guard, remove a misleading instruction, or clarify scope as needed.
@@ -459,12 +584,13 @@ Rules:
 - content MUST be a complete SKILL.md with YAML frontmatter (name + description) followed by markdown body. Body <= 100,000 chars.
 - Do not delete the skill — only revise it.
 - If the complaint is unrelated to this skill (wrong target), return {"name":"${skillName}","skip":true,"reason":"<short>"} instead.
+- If the failure was at the orchestration layer (wrong sub-agent loaded the skill, wrong order, missing prerequisite), describe the correction in the skill body — sub-agents see this skill via load_skill, so prerequisites and ordering belong here.
 
 CURRENT SKILL (${skillName}):
 \`\`\`
 ${currentSkillMd.slice(0, 30000)}
 \`\`\`
-
+${workflowHint}
 DISLIKED ASSISTANT RESPONSE EXCERPT:
 ${excerpt}
 
@@ -480,18 +606,23 @@ interface RemediationOutcome {
 }
 
 async function runRemediations(
-  candidates: NonNullable<ReturnType<typeof summariseSession>>[],
+  candidates: SessionSummary[],
   model: string,
 ): Promise<RemediationOutcome> {
   const out: RemediationOutcome = { updated: 0, skipped: 0, reasons: [], consumedSessionIds: new Set() };
 
   // Find sessions where any feedback entry is 👎 with a non-empty comment.
-  type Target = { sessionId: string; excerpt: string; comment: string };
+  type Target = { sessionId: string; excerpt: string; comment: string; candidate: SessionSummary };
   const targets: Target[] = [];
   for (const c of candidates) {
     for (const f of c.feedback) {
       if (f.rating === "down" && f.comment && f.comment.trim() && f.role === "assistant") {
-        targets.push({ sessionId: c.sessionId, excerpt: (f.excerpt || c.finalAssistant).slice(0, 1200), comment: f.comment.trim() });
+        targets.push({
+          sessionId: c.sessionId,
+          excerpt: (f.excerpt || c.finalAssistant).slice(0, 1200),
+          comment: f.comment.trim(),
+          candidate: c,
+        });
         break; // at most one remediation per session
       }
     }
@@ -507,6 +638,7 @@ async function runRemediations(
     }
     return out;
   }
+  const autoSkillNames = new Set(autoSkills.map((s) => s.name));
 
   // Preload SKILL.md contents for scoring + prompting
   const contents = new Map<string, string>();
@@ -521,7 +653,23 @@ async function runRemediations(
   }
 
   for (const t of capped) {
-    const pick = selectRemediationTarget(t.excerpt, t.comment, autoSkills, contents);
+    // Prefer the chat log as ground truth: the skills the agents *actually*
+    // loaded during this session are far better candidates than the
+    // token-overlap heuristic, which only sees the orchestrator's merged
+    // summary and would never spot a sub-agent skill.
+    const loadedAuto = collectLoadedSkills(t.candidate.subagentWorkflow).filter((n) => autoSkillNames.has(n));
+    let pick: { name: string; score: number } | null = null;
+    let strategy: "chatlog-unique" | "chatlog-subset" | "token-overlap" = "token-overlap";
+    if (loadedAuto.length === 1) {
+      pick = { name: loadedAuto[0], score: Number.POSITIVE_INFINITY };
+      strategy = "chatlog-unique";
+    } else if (loadedAuto.length > 1) {
+      const subset = autoSkills.filter((s) => loadedAuto.includes(s.name));
+      pick = selectRemediationTarget(t.excerpt, t.comment, subset, contents);
+      strategy = "chatlog-subset";
+    } else {
+      pick = selectRemediationTarget(t.excerpt, t.comment, autoSkills, contents);
+    }
     if (!pick) {
       out.skipped++;
       out.reasons.push(`remediation skipped (${t.sessionId}): no auto skill matched the disliked turn`);
@@ -534,7 +682,7 @@ async function runRemediations(
       continue;
     }
 
-    const prompt = buildRemediationPrompt(pick.name, skillMd, t.excerpt, t.comment);
+    const prompt = buildRemediationPrompt(pick.name, skillMd, t.excerpt, t.comment, t.candidate.subagentWorkflow);
     const reply = await callTigerBot(
       [{ role: "user", content: prompt }],
       "You are a careful skill remediator. Output strict JSON only.",
@@ -580,7 +728,7 @@ async function runRemediations(
       await writeProposedUpdate(v.value, model);
       out.updated++;
       out.consumedSessionIds.add(t.sessionId);
-      out.reasons.push(`remediated ${pick.name} from 👎 in ${t.sessionId}`);
+      out.reasons.push(`remediated ${pick.name} from 👎 in ${t.sessionId} (target picked via ${strategy})`);
     } catch (e: any) {
       out.skipped++;
       out.reasons.push(`remediation write failed for ${pick.name}: ${e.message}`);
@@ -605,7 +753,8 @@ export async function runAutoSkillUpdate(opts: { manual?: boolean } = {}): Promi
     const cap = Math.max(1, settings.skillAutoUpdateMaxCandidates ?? 30);
     const sortedAsc = sessions.slice().sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
     const fresh = opts.manual ? sortedAsc : sortedAsc.filter((s) => s.updatedAt > cursor);
-    const candidates = fresh.map(summariseSession).filter((c): c is NonNullable<ReturnType<typeof summariseSession>> => !!c).slice(-cap);
+    const settled = await Promise.all(fresh.map(summariseSession));
+    const candidates: SessionSummary[] = settled.filter((c): c is SessionSummary => !!c).slice(-cap);
 
     if (candidates.length === 0) {
       const summary = opts.manual ? "no successful sessions found" : "no new successful sessions";
