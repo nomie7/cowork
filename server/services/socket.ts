@@ -127,7 +127,23 @@ export function killActiveTask(taskId: string): boolean {
   return false;
 }
 
-export async function buildSystemPrompt(filterSkillIds?: string[], options?: { includeAgentConfig?: boolean }): Promise<string> {
+/**
+ * Build the `=== INSTALLED SKILLS ===` advertisement block. Used by both the
+ * orchestrator's system prompt (via buildSystemPrompt) and sub-agent /
+ * realtime-agent prompts so newly auto-generated skills become visible to
+ * every agent in the topology, not just the orchestrator.
+ *
+ * filterSkillIds: when set (e.g. project-scoped skills), accepts either
+ * skill IDs (from project.skills) or names; only those skills are advertised.
+ *
+ * leadingPersona: optional override for the introductory sentence. The
+ * default is phrased for the orchestrator ("BEFORE answering any user
+ * request..."). Sub-agents pass a sub-agent–specific phrasing via this arg.
+ */
+export async function buildEnabledSkillsBlock(
+  filterSkillIds?: string[],
+  leadingPersona?: string,
+): Promise<string> {
   // Gather installed clawhub skills
   const clawhubDir = path.resolve("Tiger_bot/skills");
   let clawhubSkills: string[] = [];
@@ -181,8 +197,7 @@ export async function buildSystemPrompt(filterSkillIds?: string[], options?: { i
   customSkills = customSkills.filter((cs) => !disabledSkillNames.has(cs.name));
 
   // Also include enabled skills from skills.json that aren't already listed
-  let registeredSkills: string[] = [];
-  registeredSkills = allSkillRecords
+  let registeredSkills: string[] = allSkillRecords
     .filter((s) => s.enabled && !clawhubSkills.includes(s.name) && !customSkills.some((cs) => cs.name === s.name))
     .map((s) => `${s.name} (${s.source})`);
 
@@ -203,8 +218,9 @@ export async function buildSystemPrompt(filterSkillIds?: string[], options?: { i
 
   let skillsList = "";
   if (clawhubSkills.length > 0 || customSkills.length > 0 || registeredSkills.length > 0) {
-    skillsList += `\n\n=== INSTALLED SKILLS ===`;
-    skillsList += `\nIMPORTANT: BEFORE answering any user request, scan the skill list below. If a skill's description matches the user's task, you MUST load and use that skill FIRST by calling load_skill("<skill-name>"), then follow its SKILL.md instructions. Do NOT write your own code from scratch when a matching skill exists. Skills contain tested implementations and supporting files (like Python engines) that should be used.`;
+    const persona = leadingPersona ??
+      `IMPORTANT: BEFORE answering any user request, scan the skill list below. If a skill's description matches the user's task, you MUST load and use that skill FIRST by calling load_skill("<skill-name>"), then follow its SKILL.md instructions. Do NOT write your own code from scratch when a matching skill exists. Skills contain tested implementations and supporting files (like Python engines) that should be used.`;
+    skillsList += `\n\n=== INSTALLED SKILLS ===\n${persona}`;
   }
   if (customSkills.length > 0) {
     skillsList += `\n\nCustom skills (priority — always prefer these):`;
@@ -221,6 +237,11 @@ export async function buildSystemPrompt(filterSkillIds?: string[], options?: { i
   if (skillsList) {
     skillsList += `\n\nSkill usage workflow: 1) call load_skill("<name>") to read SKILL.md and see supporting files, 2) if the skill has supporting .py files, use read_file to load them, 3) use run_python or run_shell to execute following the skill instructions.`;
   }
+  return skillsList;
+}
+
+export async function buildSystemPrompt(filterSkillIds?: string[], options?: { includeAgentConfig?: boolean }): Promise<string> {
+  const skillsList = await buildEnabledSkillsBlock(filterSkillIds);
 
   const settings = await getSettings();
   const includeAgents = options?.includeAgentConfig ?? false;

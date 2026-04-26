@@ -184,7 +184,7 @@ Toggling any of these from the Settings page reconciles the cron job immediately
 
 ### When does a new skill become callable?
 
-Skills are advertised to the model by `buildSystemPrompt`, which re-scans the skills directory and registry on every user message — so once a skill is `enabled: true`, the **next** user turn in any chat sees it. No server restart needed.
+Skills are advertised to **every agent** in the topology — orchestrator, `spawn_subagent` workers, and realtime/auto-swarm/auto-create agents — by `buildEnabledSkillsBlock`, which re-scans the skills directory and registry on every prompt build. Once a skill flips to `enabled: true` (i.e. after approval), the **next** user turn in any chat sees it, including any sub-agents the orchestrator spawns. No server restart needed.
 
 A skill **cannot** be applied within the same chat that produced it: synthesis only runs after a session settles, and that session is the pipeline's input, not its consumer. The earliest a skill distilled from chat A can be invoked is the next user turn that follows the next cron tick (and approval click, if required).
 

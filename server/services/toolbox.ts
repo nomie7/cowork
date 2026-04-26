@@ -2060,6 +2060,20 @@ async function getSubagentCaller() {
   return _callTigerBotForSubagent;
 }
 
+// socket.ts imports from toolbox.ts, so we lazy-load the skills-block helper
+// to avoid the circular dependency at module init time.
+let _buildEnabledSkillsBlock: typeof import("./socket").buildEnabledSkillsBlock | null = null;
+async function getEnabledSkillsBlock(): Promise<typeof import("./socket").buildEnabledSkillsBlock> {
+  if (!_buildEnabledSkillsBlock) {
+    const mod = await import("./socket");
+    _buildEnabledSkillsBlock = mod.buildEnabledSkillsBlock;
+  }
+  return _buildEnabledSkillsBlock;
+}
+
+const SUBAGENT_SKILLS_PERSONA =
+  "BEFORE you start the assigned task, scan this skill list. If a skill's description matches the task, you MUST call load_skill(\"<skill-name>\") FIRST and follow its SKILL.md instructions instead of writing your own code from scratch. These skills are shared with the orchestrator and other agents — using them keeps the team consistent.";
+
 export async function spawnSubagent(
   args: { task: string; label?: string; context?: string; agentId?: string },
   parentSessionId?: string,
@@ -2269,6 +2283,16 @@ RULES:
 - When done, provide a clear summary of what you accomplished
 
 You are sub-agent "${label}" at depth ${currentDepth + 1}/${maxDepth}.`;
+  }
+
+  // Advertise enabled skills (incl. auto-generated) so sub-agents can pick
+  // them up without first calling list_skills. Mirrors what the orchestrator
+  // gets via buildSystemPrompt.
+  try {
+    const buildBlock = await getEnabledSkillsBlock();
+    subPrompt += await buildBlock(undefined, SUBAGENT_SKILLS_PERSONA);
+  } catch (e: any) {
+    console.warn(`[SubAgent:${label}] failed to advertise skills block: ${e?.message || e}`);
   }
 
   // Append protocol instructions based on agent's actual config
@@ -2702,6 +2726,15 @@ async function realtimeAgentLoop(
   systemPrompt += `\n3. Try again with a corrected approach`;
   systemPrompt += `\n4. If the same approach fails twice, try a completely different method`;
   systemPrompt += `\nNever stop working due to a tool error — always find a way to complete the task.`;
+
+  // Advertise enabled skills (incl. auto-generated) — same block the
+  // orchestrator sees, so realtime agents can discover newly approved skills.
+  try {
+    const buildBlock = await getEnabledSkillsBlock();
+    systemPrompt += await buildBlock(undefined, SUBAGENT_SKILLS_PERSONA);
+  } catch (e: any) {
+    console.warn(`[RealtimeAgent:${agentId}] failed to advertise skills block: ${e?.message || e}`);
+  }
 
   // Protocol instructions
   const agentProtoTools = getProtocolToolsForAgent(agentDef, systemConfig.connections, systemConfig);
