@@ -11,12 +11,25 @@ interface Skill {
   script: string;
   enabled?: boolean;
   installedAt?: string;
+  reviewStatus?: "pending" | "approved" | "rejected";
+  autoMeta?: {
+    kind: "create" | "update";
+    basedOn?: string[];
+    generatedAt?: string;
+    model?: string;
+    proposedPath?: string;
+    rationale?: string;
+  };
 }
 
 export default function SkillsPage() {
   const [installed, setInstalled] = useState<Skill[]>([]);
   const [catalog, setCatalog] = useState<Skill[]>([]);
-  const [tab, setTab] = useState<"installed" | "catalog" | "clawhub" | "custom">("installed");
+  const [tab, setTab] = useState<"installed" | "auto" | "catalog" | "clawhub" | "custom">("installed");
+  const [diffOpen, setDiffOpen] = useState<string | null>(null);
+  const [diffData, setDiffData] = useState<{ current: string; proposed: string } | null>(null);
+  const [autoBusy, setAutoBusy] = useState<string | null>(null);
+  const [runNowBusy, setRunNowBusy] = useState(false);
   const [customForm, setCustomForm] = useState({ name: "", description: "", script: "" });
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadPreview, setUploadPreview] = useState<{ name: string; description: string; body: string } | null>(null);
@@ -29,6 +42,10 @@ export default function SkillsPage() {
   const [detailSlug, setDetailSlug] = useState<string | null>(null);
   const [detailData, setDetailData] = useState<{ content: string; meta: any; installed: boolean } | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [viewSkillId, setViewSkillId] = useState<string | null>(null);
+  const [viewSkillData, setViewSkillData] = useState<{ content: string; supportingFiles: string[]; source: string; skillDir: string } | null>(null);
+  const [viewSkillLoading, setViewSkillLoading] = useState(false);
+  const [viewRaw, setViewRaw] = useState(false);
 
   useEffect(() => {
     api.getSkills().then(setInstalled);
@@ -64,6 +81,45 @@ export default function SkillsPage() {
       setClawhubResults((prev) => prev + `\n\nInstall error: ${err.message}`);
     }
     setClawhubInstalling(null);
+  };
+
+  const toggleSkillView = async (id: string) => {
+    if (viewSkillId === id) {
+      setViewSkillId(null);
+      setViewSkillData(null);
+      setViewRaw(false);
+      return;
+    }
+    setViewSkillId(id);
+    setViewSkillLoading(true);
+    setViewSkillData(null);
+    setViewRaw(false);
+    try {
+      const res = await api.getSkillContent(id);
+      if (res?.ok) {
+        setViewSkillData({
+          content: res.content || "",
+          supportingFiles: res.supportingFiles || [],
+          source: res.source || "",
+          skillDir: res.skillDir || "",
+        });
+      } else {
+        setViewSkillData({
+          content: `_Could not load skill: ${res?.error || "unknown error"}_`,
+          supportingFiles: [],
+          source: "",
+          skillDir: "",
+        });
+      }
+    } catch (err: any) {
+      setViewSkillData({
+        content: `_Error loading skill: ${err.message || "unknown"}_`,
+        supportingFiles: [],
+        source: "",
+        skillDir: "",
+      });
+    }
+    setViewSkillLoading(false);
   };
 
   const viewDetail = async (slug: string) => {
@@ -155,6 +211,72 @@ export default function SkillsPage() {
     setInstalled((prev) => prev.filter((s) => s.id !== id));
   };
 
+  const refreshInstalled = async () => {
+    const fresh = await api.getSkills();
+    setInstalled(fresh);
+  };
+
+  const approveAuto = async (id: string) => {
+    setAutoBusy(id);
+    try {
+      const res = await api.approveSkill(id);
+      if (!res?.ok) alert("Approve failed: " + (res?.error || "unknown"));
+      await refreshInstalled();
+      if (diffOpen === id) { setDiffOpen(null); setDiffData(null); }
+    } catch (err: any) { alert("Approve error: " + err.message); }
+    setAutoBusy(null);
+  };
+
+  const rejectAuto = async (id: string) => {
+    if (!confirm("Reject this auto-generated skill? For new skills this deletes the SKILL.md folder.")) return;
+    setAutoBusy(id);
+    try {
+      const res = await api.rejectSkill(id);
+      if (!res?.ok) alert("Reject failed: " + (res?.error || "unknown"));
+      await refreshInstalled();
+      if (diffOpen === id) { setDiffOpen(null); setDiffData(null); }
+    } catch (err: any) { alert("Reject error: " + err.message); }
+    setAutoBusy(null);
+  };
+
+  const toggleDiff = async (id: string) => {
+    if (diffOpen === id) { setDiffOpen(null); setDiffData(null); return; }
+    setDiffOpen(id);
+    setDiffData(null);
+    try {
+      const res = await api.getSkillProposedDiff(id);
+      if (res?.ok) setDiffData({ current: res.current || "", proposed: res.proposed || "" });
+      else setDiffData({ current: "", proposed: `Error: ${res?.error || "unknown"}` });
+    } catch (err: any) {
+      setDiffData({ current: "", proposed: `Error: ${err.message}` });
+    }
+  };
+
+  const runAutoNow = async () => {
+    setRunNowBusy(true);
+    try {
+      const res = await api.runAutoSkillNow();
+      if (!res?.ok) {
+        alert("Run failed: " + (res?.error || "unknown"));
+      } else {
+        const created = res.created ?? 0;
+        const updated = res.updated ?? 0;
+        const skipped = res.skipped ?? 0;
+        const reasons: string[] = Array.isArray(res.reasons) ? res.reasons : [];
+        const summary = `created=${created} updated=${updated} skipped=${skipped}`;
+        if (created + updated === 0) {
+          alert(`Run finished with no changes. ${summary}${reasons.length ? `\nReasons: ${reasons.join("; ")}` : ""}`);
+        } else {
+          alert(`Run done: ${summary}${reasons.length ? `\nReasons: ${reasons.join("; ")}` : ""}`);
+        }
+      }
+      await refreshInstalled();
+    } catch (err: any) {
+      alert("Run error: " + err.message);
+    }
+    setRunNowBusy(false);
+  };
+
   const installCustom = async () => {
     const result = await api.installSkill({ ...customForm, source: "custom" });
     setInstalled((prev) => [...prev, result]);
@@ -229,11 +351,20 @@ export default function SkillsPage() {
       <div className="page-header">
         <h1>Skills</h1>
         <div className="tab-bar">
-          {(["installed", "catalog", "clawhub", "custom"] as const).map((t) => (
-            <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
-              {t === "installed" ? `Installed (${installed.length})` : t === "catalog" ? "Built-in" : t === "clawhub" ? "Clawhub" : "Custom Skill"}
-            </button>
-          ))}
+          {(["installed", "auto", "catalog", "clawhub", "custom"] as const).map((t) => {
+            const autoCount = installed.filter((s) => s.source === "auto").length;
+            const pendingCount = installed.filter((s) => s.source === "auto" && s.reviewStatus === "pending").length;
+            const label =
+              t === "installed" ? `Installed (${installed.length})`
+              : t === "auto" ? `Auto-Generated${autoCount ? ` (${autoCount}${pendingCount ? ` · ${pendingCount} pending` : ""})` : ""}`
+              : t === "catalog" ? "Built-in"
+              : t === "clawhub" ? "Clawhub" : "Custom Skill";
+            return (
+              <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
+                {label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -245,11 +376,20 @@ export default function SkillsPage() {
                 <div className="card-title-row">
                   <h3>{skill.name}</h3>
                   <span className={`source-badge ${skill.source}`}>{skill.source}</span>
+                  {skill.source === "auto" && skill.reviewStatus === "pending" && (
+                    <span className="status-badge inactive" style={{ background: "#fef7e0", color: "#ea8600", border: "1px solid #f9c97a" }}>Pending review</span>
+                  )}
                   <span className={`status-badge ${skill.enabled ? "active" : "inactive"}`}>
                     {skill.enabled ? "Enabled" : "Disabled"}
                   </span>
                 </div>
                 <div className="card-actions">
+                  <button className="btn btn-ghost btn-sm" onClick={() => toggleSkillView(skill.id!)}>
+                    {viewSkillId === skill.id ? "Hide" : "View"}
+                  </button>
+                  <a className="btn btn-ghost btn-sm" href={api.skillDownloadUrl(skill.id!)} download title="Download SKILL.md or zip of skill folder">
+                    Download
+                  </a>
                   <button className="btn btn-ghost btn-sm" onClick={() => toggleSkill(skill)}>
                     {skill.enabled ? "Disable" : "Enable"}
                   </button>
@@ -257,9 +397,137 @@ export default function SkillsPage() {
                 </div>
               </div>
               <p className="card-desc">{skill.description}</p>
+              {viewSkillId === skill.id && (
+                <SkillViewer
+                  loading={viewSkillLoading}
+                  data={viewSkillData}
+                  raw={viewRaw}
+                  onToggleRaw={() => setViewRaw((v) => !v)}
+                  parseFrontmatter={parseFrontmatter}
+                  renderMarkdown={renderMarkdown}
+                />
+              )}
             </div>
           ))}
           {installed.length === 0 && <div className="empty-state-full"><p>No skills installed</p><p className="hint">Browse the catalog to install skills</p></div>}
+        </div>
+      )}
+
+      {tab === "auto" && (
+        <div className="card-list">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <p className="hint" style={{ margin: 0 }}>
+              Skills authored automatically by the AI from recent successful chats. Configure in Settings → Skill Auto-Update Loop.
+            </p>
+            <button className="btn btn-ghost btn-sm" onClick={runAutoNow} disabled={runNowBusy}>
+              {runNowBusy ? "Running..." : "Run now"}
+            </button>
+          </div>
+          {installed.filter((s) => s.source === "auto").length === 0 && (
+            <div className="empty-state-full">
+              <p>No auto-generated skills yet</p>
+              <p className="hint">Enable the loop in Settings, chat with the agent, then click "Run now" or wait for the next tick.</p>
+            </div>
+          )}
+          {installed.filter((s) => s.source === "auto").map((skill) => {
+            const meta = skill.autoMeta;
+            const isUpdate = meta?.kind === "update";
+            const hasProposedFile = !!meta?.proposedPath;
+            const isPending = skill.reviewStatus === "pending";
+            return (
+              <div key={skill.id} className="card">
+                <div className="card-header">
+                  <div className="card-title-row">
+                    <h3>{skill.name}</h3>
+                    <span className="source-badge auto">auto</span>
+                    <span className="status-badge inactive" style={{ background: meta?.kind === "update" ? "#e8f0fe" : "#e6f4ea", color: meta?.kind === "update" ? "#1967d2" : "#137333" }}>
+                      {meta?.kind === "update" ? "Update" : "Create"}
+                    </span>
+                    {isPending && (
+                      <span className="status-badge inactive" style={{ background: "#fef7e0", color: "#ea8600" }}>
+                        Pending review
+                      </span>
+                    )}
+                    {!isPending && skill.reviewStatus === "approved" && (
+                      <span className="status-badge active">Approved</span>
+                    )}
+                  </div>
+                  <div className="card-actions">
+                    {(isUpdate || skill.reviewStatus === "pending") && (
+                      <button className="btn btn-ghost btn-sm" onClick={() => toggleDiff(skill.id!)}>
+                        {diffOpen === skill.id ? "Hide diff" : isUpdate ? "View diff" : "View content"}
+                      </button>
+                    )}
+                    {!isPending && (
+                      <button className="btn btn-ghost btn-sm" onClick={() => toggleSkillView(skill.id!)}>
+                        {viewSkillId === skill.id ? "Hide" : "View"}
+                      </button>
+                    )}
+                    <a className="btn btn-ghost btn-sm" href={api.skillDownloadUrl(skill.id!)} download title="Download SKILL.md or zip of skill folder">
+                      Download
+                    </a>
+                    {isPending && (
+                      <button className="btn btn-primary btn-sm" disabled={autoBusy === skill.id} onClick={() => approveAuto(skill.id!)}>
+                        {autoBusy === skill.id ? "..." : "Approve"}
+                      </button>
+                    )}
+                    <button className="btn btn-danger btn-sm" disabled={autoBusy === skill.id} onClick={() => rejectAuto(skill.id!)}>
+                      {autoBusy === skill.id ? "..." : isPending ? "Reject" : "Delete"}
+                    </button>
+                  </div>
+                </div>
+                <p className="card-desc">{skill.description}</p>
+                {meta?.rationale && (
+                  <p className="card-desc" style={{ opacity: 0.7, fontSize: 12, marginTop: 4 }}>
+                    <strong>Rationale:</strong> {meta.rationale}
+                  </p>
+                )}
+                {meta?.basedOn && meta.basedOn.length > 0 && (
+                  <p className="card-desc" style={{ opacity: 0.6, fontSize: 11, marginTop: 4 }}>
+                    Based on session{meta.basedOn.length > 1 ? "s" : ""}: {meta.basedOn.map((s) => s.slice(0, 8)).join(", ")}
+                  </p>
+                )}
+                {meta?.generatedAt && (
+                  <p className="card-desc" style={{ opacity: 0.5, fontSize: 11, marginTop: 2 }}>
+                    Generated {new Date(meta.generatedAt).toLocaleString()}{meta.model ? ` · ${meta.model}` : ""}
+                  </p>
+                )}
+                {hasProposedFile && isPending && (
+                  <p className="card-desc" style={{ opacity: 0.6, fontSize: 11, marginTop: 2 }}>
+                    Proposed file: <code>{meta?.proposedPath}</code>
+                  </p>
+                )}
+                {diffOpen === skill.id && (
+                  <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: isUpdate ? "1fr 1fr" : "1fr", gap: 12 }}>
+                    {isUpdate && (
+                      <div>
+                        <strong style={{ fontSize: 12, opacity: 0.7 }}>Current SKILL.md</strong>
+                        <pre style={{ maxHeight: 400, overflow: "auto", fontSize: 11, padding: 10, background: "var(--bg-secondary,#f8f9fa)", border: "1px solid var(--border,#ddd)", borderRadius: 6, whiteSpace: "pre-wrap" }}>
+                          {diffData?.current ?? "(loading...)"}
+                        </pre>
+                      </div>
+                    )}
+                    <div>
+                      <strong style={{ fontSize: 12, opacity: 0.7 }}>{isUpdate ? "Proposed update" : "Generated content"}</strong>
+                      <pre style={{ maxHeight: 400, overflow: "auto", fontSize: 11, padding: 10, background: "var(--bg-secondary,#f8f9fa)", border: "1px solid var(--border,#ddd)", borderRadius: 6, whiteSpace: "pre-wrap" }}>
+                        {diffData?.proposed ?? "(loading...)"}
+                      </pre>
+                    </div>
+                  </div>
+                )}
+                {viewSkillId === skill.id && !isPending && (
+                  <SkillViewer
+                    loading={viewSkillLoading}
+                    data={viewSkillData}
+                    raw={viewRaw}
+                    onToggleRaw={() => setViewRaw((v) => !v)}
+                    parseFrontmatter={parseFrontmatter}
+                    renderMarkdown={renderMarkdown}
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -448,6 +716,7 @@ export default function SkillsPage() {
         </div>
       )}
 
+      {/* (custom tab below) */}
       {tab === "custom" && (
         <div className="card form-card">
           <h3>Upload Skill</h3>
@@ -521,6 +790,77 @@ export default function SkillsPage() {
           <div className="form-actions">
             <button className="btn btn-primary" onClick={installCustom} disabled={!customForm.name}>Install</button>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface SkillViewerProps {
+  loading: boolean;
+  data: { content: string; supportingFiles: string[]; source: string; skillDir: string } | null;
+  raw: boolean;
+  onToggleRaw: () => void;
+  parseFrontmatter: (content: string) => { fm: Record<string, string>; body: string };
+  renderMarkdown: (text: string) => string;
+}
+
+function SkillViewer({ loading, data, raw, onToggleRaw, parseFrontmatter, renderMarkdown }: SkillViewerProps) {
+  if (loading) {
+    return (
+      <div style={{ marginTop: 10, padding: 14, background: "var(--bg-secondary, #f8f9fa)", border: "1px solid var(--border, #ddd)", borderRadius: 6, fontSize: 13, opacity: 0.6, textAlign: "center" }}>
+        Loading SKILL.md...
+      </div>
+    );
+  }
+  if (!data) return null;
+  const { fm, body } = parseFrontmatter(data.content);
+  return (
+    <div style={{ marginTop: 10, padding: 14, background: "var(--bg-secondary, #f8f9fa)", border: "1px solid var(--border, #ddd)", borderRadius: 6, fontSize: 13, maxHeight: 500, overflow: "auto" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {data.source && (
+            <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: "#e8f0fe", color: "#1967d2", fontWeight: 600 }}>
+              {data.source}
+            </span>
+          )}
+          {data.skillDir && (
+            <code style={{ fontSize: 11, opacity: 0.6 }}>{data.skillDir}</code>
+          )}
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={onToggleRaw} title={raw ? "Show rendered" : "Show raw markdown"}>
+          {raw ? "Rendered" : "Raw"}
+        </button>
+      </div>
+      {!raw && Object.keys(fm).length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12, padding: "8px 12px", background: "#fff", borderRadius: 6, border: "1px solid var(--border, #ddd)" }}>
+          {fm.name && <span style={{ fontWeight: 700, fontSize: 14 }}>{fm.name}</span>}
+          {fm.description && <span style={{ opacity: 0.7, flex: 1, minWidth: 200 }}>{fm.description}</span>}
+          {fm["allowed-tools"] && (
+            <div style={{ width: "100%", marginTop: 4 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, opacity: 0.5, marginRight: 4 }}>TOOLS:</span>
+              {fm["allowed-tools"].split(",").map((t, ti) => (
+                <span key={ti} style={{ display: "inline-block", fontSize: 11, padding: "1px 6px", background: "#e8f0fe", color: "#1967d2", borderRadius: 4, marginRight: 4, marginBottom: 2 }}>
+                  {t.trim()}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {raw ? (
+        <pre style={{ fontSize: 11, padding: 10, background: "#fff", border: "1px solid var(--border, #ddd)", borderRadius: 6, whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0 }}>
+          {data.content}
+        </pre>
+      ) : (
+        <div style={{ lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }} />
+      )}
+      {data.supportingFiles.length > 0 && (
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border, #ddd)" }}>
+          <strong style={{ fontSize: 12, opacity: 0.7 }}>Supporting files ({data.supportingFiles.length})</strong>
+          <ul style={{ margin: "6px 0 0", paddingLeft: 20, fontSize: 12, opacity: 0.8 }}>
+            {data.supportingFiles.map((f) => <li key={f}><code>{f}</code></li>)}
+          </ul>
         </div>
       )}
     </div>

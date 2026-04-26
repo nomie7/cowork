@@ -7,6 +7,47 @@ import AdmZip from "adm-zip";
 import yaml from "js-yaml";
 import { getSkills, saveSkills } from "../services/data";
 import { listInstalledSkills } from "../services/clawhub";
+import {
+  approveSkill as approveAutoSkill,
+  rejectSkill as rejectAutoSkill,
+  getProposedDiff,
+  runAutoSkillUpdate,
+} from "../services/skillAutoUpdater";
+
+const CUSTOM_SKILLS_DIR = path.resolve("skills");
+const CLAWHUB_SKILLS_DIR = path.resolve("Tiger_bot/skills");
+
+function slugifySkillName(name: string): string {
+  return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+/** Locate a skill's on-disk folder by trying the registry script, raw name, and slugified name across both skill directories. */
+function resolveSkillDir(name: string, script?: string): { dir: string; source: "custom" | "clawhub" } | null {
+  const candidates = Array.from(new Set([name, script, slugifySkillName(name)].filter(Boolean) as string[]));
+  for (const cand of candidates) {
+    for (const [dir, source] of [[CUSTOM_SKILLS_DIR, "custom"], [CLAWHUB_SKILLS_DIR, "clawhub"]] as const) {
+      const base = path.join(dir, cand);
+      if (fs.existsSync(path.join(base, "SKILL.md"))) return { dir: base, source };
+    }
+  }
+  return null;
+}
+
+function listSkillFiles(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (d: string, prefix: string) => {
+    try {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        if (e.name.startsWith(".") || e.name === "__MACOSX") continue;
+        const rel = prefix ? `${prefix}/${e.name}` : e.name;
+        if (e.isDirectory()) walk(path.join(d, e.name), rel);
+        else out.push(rel);
+      }
+    } catch {}
+  };
+  walk(dir, "");
+  return out;
+}
 
 /** Parse SKILL.md frontmatter and return name + description */
 function parseFrontmatter(content: string): { name: string; description: string } {
@@ -220,6 +261,101 @@ export async function skillsRoutes(fastify: FastifyInstance) {
     } catch (err: any) {
       reply.code(500); return { error: err.message };
     }
+  });
+
+  // ── Auto-generated skill review endpoints ──
+  fastify.post("/auto/run-now", async (_request, reply) => {
+    try {
+      const summary = await runAutoSkillUpdate({ manual: true });
+      return { ok: true, ...summary };
+    } catch (err: any) {
+      reply.code(500);
+      return { ok: false, error: err.message };
+    }
+  });
+
+  fastify.post("/:id/approve", async (request, reply) => {
+    const id = (request.params as any).id;
+    const result = await approveAutoSkill(id);
+    if (!result.ok) { reply.code(400); return result; }
+    return result;
+  });
+
+  fastify.post("/:id/reject", async (request, reply) => {
+    const id = (request.params as any).id;
+    const result = await rejectAutoSkill(id);
+    if (!result.ok) { reply.code(400); return result; }
+    return result;
+  });
+
+  fastify.get("/:id/proposed-diff", async (request, reply) => {
+    const id = (request.params as any).id;
+    const result = await getProposedDiff(id);
+    if (!result.ok) { reply.code(400); return result; }
+    return result;
+  });
+
+  // Read SKILL.md content + supporting file list for a skill (View action)
+  fastify.get("/:id/content", async (request, reply) => {
+    const id = (request.params as any).id;
+    const skills = await getSkills();
+    const skill = skills.find((s) => s.id === id);
+    if (!skill) { reply.code(404); return { ok: false, error: "Skill not found" }; }
+    const resolved = resolveSkillDir(skill.name, skill.script);
+    if (!resolved) {
+      return { ok: false, error: `No SKILL.md on disk for "${skill.name}". Tried ${CUSTOM_SKILLS_DIR} and ${CLAWHUB_SKILLS_DIR}.` };
+    }
+    let content = "";
+    try {
+      content = fs.readFileSync(path.join(resolved.dir, "SKILL.md"), "utf-8");
+    } catch (err: any) {
+      reply.code(500); return { ok: false, error: `Failed to read SKILL.md: ${err.message}` };
+    }
+    const supportingFiles = listSkillFiles(resolved.dir).filter((f) => f !== "SKILL.md");
+    return {
+      ok: true,
+      name: skill.name,
+      source: resolved.source,
+      skillDir: resolved.dir,
+      content,
+      supportingFiles,
+    };
+  });
+
+  // Download a skill: single SKILL.md if it's the only file, otherwise zip the whole folder
+  fastify.get("/:id/download", async (request, reply) => {
+    const id = (request.params as any).id;
+    const skills = await getSkills();
+    const skill = skills.find((s) => s.id === id);
+    if (!skill) { reply.code(404); return reply.send({ ok: false, error: "Skill not found" }); }
+    const resolved = resolveSkillDir(skill.name, skill.script);
+    if (!resolved) {
+      reply.code(404);
+      return reply.send({ ok: false, error: `No SKILL.md on disk for "${skill.name}"` });
+    }
+    const safeName = slugifySkillName(skill.name) || "skill";
+    const files = listSkillFiles(resolved.dir);
+
+    if (files.length === 1 && files[0] === "SKILL.md") {
+      const buf = fs.readFileSync(path.join(resolved.dir, "SKILL.md"));
+      reply.header("Content-Type", "text/markdown; charset=utf-8");
+      reply.header("Content-Disposition", `attachment; filename="${safeName}.SKILL.md"`);
+      return reply.send(buf);
+    }
+
+    const zip = new AdmZip();
+    for (const rel of files) {
+      const abs = path.join(resolved.dir, rel);
+      try {
+        const data = fs.readFileSync(abs);
+        const insideName = `${safeName}/${rel}`;
+        zip.addFile(insideName, data);
+      } catch {}
+    }
+    const buf = zip.toBuffer();
+    reply.header("Content-Type", "application/zip");
+    reply.header("Content-Disposition", `attachment; filename="${safeName}.zip"`);
+    return reply.send(buf);
   });
 
   // Browse available skills (Claude / OpenClaw catalog)

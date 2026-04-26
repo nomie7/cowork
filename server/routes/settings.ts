@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify";
 import { getSettings, saveSettings, getFileTokens, saveFileTokens, generateToken } from "../services/data";
 import { connectServer, disconnectServer, getMcpStatus, initMcpServers } from "../services/mcp";
 import { remoteTask } from "../services/remote";
+import { reconcileAutoSkillJob } from "../services/scheduler";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
@@ -110,6 +111,12 @@ export async function settingsRoutes(fastify: FastifyInstance) {
       });
     }
     await saveSettings(updated);
+    // If skill auto-update settings changed, reconcile the cron job so toggle takes effect immediately
+    try {
+      await reconcileAutoSkillJob();
+    } catch (err: any) {
+      console.error("[settings] reconcileAutoSkillJob failed:", err.message);
+    }
     return { success: true };
   });
 

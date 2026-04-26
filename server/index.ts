@@ -22,7 +22,7 @@ import { agentsRoutes } from "./routes/agents";
 import { remoteRoutes } from "./routes/remote";
 import { setupSocket } from "./services/socket";
 import { initMcpServers } from "./services/mcp";
-import { initScheduler } from "./services/scheduler";
+import { initScheduler, reconcileAutoSkillJob } from "./services/scheduler";
 import { getFileTokens, saveFileTokens, generateToken, isValidFileToken, getSettings } from "./services/data";
 
 dotenv.config();
@@ -209,6 +209,7 @@ async function start() {
 
   // Initialize scheduler
   await initScheduler();
+  await reconcileAutoSkillJob();
 
   // Vite dev middleware or production static files
   if (process.env.NODE_ENV !== "production") {

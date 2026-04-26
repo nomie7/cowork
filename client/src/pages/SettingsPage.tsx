@@ -1013,6 +1013,8 @@ export default function SettingsPage() {
           )}
         </section>
 
+        <SkillAutoUpdateSection settings={settings} setSettings={setSettings} />
+
         <section className="card">
           <h3>File Access Tokens</h3>
           <p className="hint" style={{ marginBottom: 12 }}>
@@ -1349,6 +1351,8 @@ export default function SettingsPage() {
         </section>
       </div>
 
+      {/* Skill auto-update section helper component */}
+
       {/* Agent Editor Modal */}
       {showAgentEditor && (
         <Suspense fallback={<div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>Loading editor...</div>}>
@@ -1370,5 +1374,131 @@ export default function SettingsPage() {
         </Suspense>
       )}
     </div>
+  );
+}
+
+function SkillAutoUpdateSection({ settings, setSettings }: { settings: any; setSettings: (s: any) => void }) {
+  const [running, setRunning] = useState(false);
+  const [lastRun, setLastRun] = useState<string | null>(null);
+
+  const enabled = !!settings.skillAutoUpdateEnabled;
+  const interval = settings.skillAutoUpdateIntervalMinutes ?? 60;
+  const maxCandidates = settings.skillAutoUpdateMaxCandidates ?? 30;
+  const requireApproval = settings.skillAutoUpdateRequireApproval !== false;
+  const humanFeedback = !!settings.skillAutoUpdateHumanFeedbackEnabled;
+
+  const runNow = async () => {
+    setRunning(true);
+    try {
+      const res = await api.runAutoSkillNow();
+      if (res?.ok) {
+        setLastRun(`created=${res.created} updated=${res.updated} skipped=${res.skipped}`);
+      } else {
+        setLastRun(`error: ${res?.error || "unknown"}`);
+      }
+      // Refresh settings to pick up new lastRunAt / lastRunSummary
+      try {
+        const s = await api.getSettings();
+        setSettings(s);
+      } catch {}
+    } catch (err: any) {
+      setLastRun(`error: ${err.message}`);
+    }
+    setRunning(false);
+  };
+
+  return (
+    <section className="card">
+      <h3>Skill Auto-Update Loop</h3>
+      <p className="hint" style={{ marginBottom: 12 }}>
+        Periodically scan recent successful chats and let the AI synthesise a new skill or propose an update to an existing auto-generated skill. Inspired by the hermes-agent skill loop. Save settings to take effect.
+      </p>
+      <div className="form-group">
+        <label className="toggle-label">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setSettings({ ...settings, skillAutoUpdateEnabled: e.target.checked })}
+          />
+          <span>Enable auto-update skill loop</span>
+        </label>
+      </div>
+      {enabled && (
+        <>
+          <div className="form-group">
+            <label>Interval (minutes)</label>
+            <input
+              type="number"
+              value={interval}
+              min={5}
+              max={1440}
+              step={5}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  skillAutoUpdateIntervalMinutes: Math.min(1440, Math.max(5, parseInt(e.target.value) || 60)),
+                })
+              }
+            />
+            <p className="hint">How often the loop wakes up to inspect recent successful chats (min 5, max 1440).</p>
+          </div>
+          <div className="form-group">
+            <label>Max candidates per run</label>
+            <input
+              type="number"
+              value={maxCandidates}
+              min={1}
+              max={200}
+              step={1}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  skillAutoUpdateMaxCandidates: Math.min(200, Math.max(1, parseInt(e.target.value) || 30)),
+                })
+              }
+            />
+            <p className="hint">Most recent N successful sessions considered each tick (default 30).</p>
+          </div>
+          <div className="form-group">
+            <label className="toggle-label">
+              <input
+                type="checkbox"
+                checked={requireApproval}
+                onChange={(e) => setSettings({ ...settings, skillAutoUpdateRequireApproval: e.target.checked })}
+              />
+              <span>Require approval before activating new skills (recommended)</span>
+            </label>
+            <p className="hint">When on, AI-written skills land as drafts. Review them in the Skills → Auto-Generated tab.</p>
+          </div>
+          <div className="form-group">
+            <label className="toggle-label">
+              <input
+                type="checkbox"
+                checked={humanFeedback}
+                onChange={(e) => setSettings({ ...settings, skillAutoUpdateHumanFeedbackEnabled: e.target.checked })}
+              />
+              <span>Collect human feedback on assistant responses</span>
+            </label>
+            <p className="hint">Adds 👍 / 👎 / 💬 buttons above each assistant message in the chat. Ratings and comments are recorded on the session and fed into the skill synthesiser so liked answers reinforce skills and disliked ones get corrected.</p>
+          </div>
+
+          <div className="form-group">
+            <label>Last run</label>
+            <div style={{ fontSize: 13, opacity: 0.85 }}>
+              {settings.skillAutoUpdateLastRunAt
+                ? `${new Date(settings.skillAutoUpdateLastRunAt).toLocaleString()} — ${settings.skillAutoUpdateLastRunSummary || "(no summary)"}`
+                : "(never)"}
+              {lastRun && <div style={{ marginTop: 4, opacity: 0.85 }}>This session: {lastRun}</div>}
+            </div>
+          </div>
+
+          <div className="form-actions">
+            <button className="btn btn-ghost btn-sm" onClick={runNow} disabled={running}>
+              {running ? "Running..." : "Run now"}
+            </button>
+          </div>
+        </>
+      )}
+    </section>
   );
 }

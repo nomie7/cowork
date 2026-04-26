@@ -48,6 +48,8 @@ export const api = {
   createSession: (title?: string) => request("/chat/sessions", { method: "POST", body: JSON.stringify({ title }) }),
   deleteSession: (id: string) => request(`/chat/sessions/${id}`, { method: "DELETE" }),
   renameSession: (id: string, title: string) => request(`/chat/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
+  saveMessageFeedback: (sessionId: string, index: number, payload: { rating?: "up" | "down" | null; comment?: string; clear?: boolean }) =>
+    request(`/chat/sessions/${sessionId}/messages/${index}/feedback`, { method: "POST", body: JSON.stringify(payload) }),
 
   // Files
   listFiles: (path?: string) => request(`/files?path=${encodeURIComponent(path || "")}`),
@@ -104,6 +106,15 @@ export const api = {
   },
   updateSkill: (id: string, data: any) => request(`/skills/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   deleteSkill: (id: string) => request(`/skills/${id}`, { method: "DELETE" }),
+  approveSkill: (id: string) => request(`/skills/${id}/approve`, { method: "POST" }),
+  rejectSkill: (id: string) => request(`/skills/${id}/reject`, { method: "POST" }),
+  getSkillProposedDiff: (id: string) => request(`/skills/${id}/proposed-diff`),
+  runAutoSkillNow: () => request("/skills/auto/run-now", { method: "POST" }),
+  getSkillContent: (id: string) => request(`/skills/${id}/content`),
+  skillDownloadUrl: (id: string) => {
+    const token = getAccessToken();
+    return `${BASE}/skills/${id}/download${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+  },
 
   // Clawhub
   clawhubSearch: (query: string, limit = 10) => request(`/clawhub/search?q=${encodeURIComponent(query)}&limit=${limit}`),

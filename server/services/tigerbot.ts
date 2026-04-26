@@ -473,6 +473,18 @@ async function writeCompactTranscript(
  * restores critical context (files, plans, skills), and writes
  * a transcript of the pre-compact messages for later retrieval.
  */
+// Identify system messages that were injected by a prior compaction so we can
+// drop them on the next compaction instead of letting them accumulate. Without
+// this, every compaction stacks another COMPACT BOUNDARY + summary + post-compact
+// block on top of the previous ones, growing the system prefix unboundedly.
+function isCompactArtifact(msg: ChatMessage): boolean {
+  if (msg.role !== "system") return false;
+  const c = typeof msg.content === "string" ? msg.content : "";
+  return c.startsWith("[COMPACT BOUNDARY") ||
+    c.startsWith("[Post-compact:") ||
+    c.startsWith("This session is continued from a previous conversation");
+}
+
 export async function compressOlderMessages(
   allMessages: ChatMessage[],
   windowSize: number = 10,
@@ -484,9 +496,16 @@ export async function compressOlderMessages(
     systemEnd++;
   }
 
+  // Preserve only the original system prompt(s); strip prior compaction artifacts
+  // so they don't accumulate on every compaction cycle.
+  const originalSystem = allMessages.slice(0, systemEnd).filter((m) => !isCompactArtifact(m));
   const nonSystemMessages = allMessages.slice(systemEnd);
   if (nonSystemMessages.length <= windowSize) {
-    return allMessages; // Nothing to compress
+    // Nothing to compress, but dedupe accumulated artifacts if any slipped in
+    if (originalSystem.length < systemEnd) {
+      return [...originalSystem, ...nonSystemMessages];
+    }
+    return allMessages;
   }
 
   // Circuit breaker: skip if too many consecutive failures
@@ -651,8 +670,9 @@ export async function compressOlderMessages(
 
   // ─── Step 8: Build the new message history ───
   const compressed: ChatMessage[] = [
-    // Keep original system messages
-    ...allMessages.slice(0, systemEnd),
+    // Keep only the ORIGINAL system prompt(s); compaction artifacts from prior
+    // compactions were filtered out above to prevent unbounded growth.
+    ...originalSystem,
     // Compact boundary marker
     {
       role: "system",
@@ -691,6 +711,9 @@ export async function compressOlderMessages(
   // ─── Step 9: Cleanup ───
   // Clear file-read cache (will be rebuilt as conversation continues)
   _recentFileReads.clear();
+  // Clear invoked-skills cache so stale skills don't linger across compactions
+  // (the snapshot just embedded in postCompactAttachments preserves what's needed)
+  _invokedSkills.clear();
 
   // Execute post-compact hooks
   for (const hook of _postCompactHooks) {
