@@ -36,11 +36,18 @@ interface FileEntry {
   path: string;
 }
 
+interface MessageFeedback {
+  rating?: "up" | "down";
+  comment?: string;
+  submittedAt?: string;
+}
+
 interface Message {
   role: string;
   content: string;
   timestamp: string;
   files?: string[];
+  feedback?: MessageFeedback;
 }
 
 interface Session {
@@ -366,6 +373,10 @@ function ProjectChat({ project, allSkills }: { project: Project; allSkills: Skil
   const [showAgentEditor, setShowAgentEditor] = useState(false);
   const [agentEditorYaml, setAgentEditorYaml] = useState<string | undefined>();
   const [agentEditorFilename, setAgentEditorFilename] = useState<string | undefined>();
+  const [humanFeedbackEnabled, setHumanFeedbackEnabled] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState<number | null>(null);
+  const [feedbackDraft, setFeedbackDraft] = useState("");
+  const [feedbackBusy, setFeedbackBusy] = useState<number | null>(null);
   const activityLogRef = useRef<HTMLDivElement>(null);
   const chatLogRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -388,6 +399,29 @@ function ProjectChat({ project, allSkills }: { project: Project; allSkills: Skil
       setSessions(projectSessions);
     });
   }, [project.id, project.name]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getSettings().then((s: any) => {
+      if (!cancelled) setHumanFeedbackEnabled(!!s?.skillAutoUpdateHumanFeedbackEnabled);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const submitFeedback = async (
+    index: number,
+    payload: { rating?: "up" | "down"; comment?: string; clear?: boolean },
+  ) => {
+    if (!activeSession) return;
+    setFeedbackBusy(index);
+    try {
+      const res = await api.saveMessageFeedback(activeSession, index, payload);
+      if (res?.ok) {
+        setMessages((prev) => prev.map((m, i) => (i === index ? { ...m, feedback: res.feedback || undefined } : m)));
+      }
+    } catch {}
+    setFeedbackBusy(null);
+  };
 
   useEffect(() => {
     if (activeSession) {
@@ -800,6 +834,89 @@ function ProjectChat({ project, allSkills }: { project: Project; allSkills: Skil
                 <div key={i} className={`message ${msg.role}`}>
                   <div className="message-avatar">{msg.role === "user" ? "U" : "C"}</div>
                   <div className="message-content">
+                    {msg.role === "assistant" && humanFeedbackEnabled && (
+                      <div className="feedback-bar">
+                        <button
+                          type="button"
+                          title={msg.feedback?.rating === "up" ? "You marked this helpful — click to undo" : "Helpful"}
+                          aria-pressed={msg.feedback?.rating === "up"}
+                          disabled={feedbackBusy === i}
+                          className={`feedback-btn up ${msg.feedback?.rating === "up" ? "active" : ""}`}
+                          onClick={() => submitFeedback(i, msg.feedback?.rating === "up" ? { clear: true } : { rating: "up" })}
+                        >
+                          <span>👍</span>
+                          {msg.feedback?.rating === "up" && <span className="check-mark">✓</span>}
+                        </button>
+                        <button
+                          type="button"
+                          title={msg.feedback?.rating === "down" ? "You marked this not helpful — click to undo" : "Not helpful"}
+                          aria-pressed={msg.feedback?.rating === "down"}
+                          disabled={feedbackBusy === i}
+                          className={`feedback-btn down ${msg.feedback?.rating === "down" ? "active" : ""}`}
+                          onClick={() => submitFeedback(i, msg.feedback?.rating === "down" ? { clear: true } : { rating: "down" })}
+                        >
+                          <span>👎</span>
+                          {msg.feedback?.rating === "down" && <span className="check-mark">✓</span>}
+                        </button>
+                        <button
+                          type="button"
+                          title={msg.feedback?.comment ? "Edit your comment" : "Add a comment"}
+                          aria-pressed={!!msg.feedback?.comment}
+                          className={`feedback-btn comment ${msg.feedback?.comment ? "active" : ""}`}
+                          onClick={() => {
+                            if (feedbackOpen === i) { setFeedbackOpen(null); setFeedbackDraft(""); }
+                            else { setFeedbackOpen(i); setFeedbackDraft(msg.feedback?.comment || ""); }
+                          }}
+                        >
+                          <span>💬</span>
+                          <span style={{ fontSize: 12 }}>{msg.feedback?.comment ? "Edit comment" : "Comment"}</span>
+                          {msg.feedback?.comment && <span className="check-mark">✓</span>}
+                        </button>
+                        {msg.feedback?.submittedAt && (
+                          <span className="feedback-saved">
+                            saved for skill update · {new Date(msg.feedback.submittedAt).toLocaleTimeString()}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {msg.role === "assistant" && humanFeedbackEnabled && msg.feedback?.comment && feedbackOpen !== i && (
+                      <div className="feedback-saved-comment">{msg.feedback.comment}</div>
+                    )}
+                    {msg.role === "assistant" && humanFeedbackEnabled && feedbackOpen === i && (
+                      <div className="feedback-editor">
+                        <textarea
+                          value={feedbackDraft}
+                          onChange={(e) => setFeedbackDraft(e.target.value)}
+                          placeholder="What worked or didn't? This is fed into the skill synthesiser."
+                        />
+                        <div className="feedback-editor-actions">
+                          <button
+                            className="btn btn-primary btn-sm"
+                            disabled={feedbackBusy === i}
+                            onClick={async () => {
+                              await submitFeedback(i, { comment: feedbackDraft });
+                              setFeedbackOpen(null);
+                              setFeedbackDraft("");
+                            }}
+                          >Save comment</button>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => { setFeedbackOpen(null); setFeedbackDraft(""); }}
+                          >Cancel</button>
+                          {msg.feedback?.comment && (
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              disabled={feedbackBusy === i}
+                              onClick={async () => {
+                                await submitFeedback(i, { comment: "" });
+                                setFeedbackOpen(null);
+                                setFeedbackDraft("");
+                              }}
+                            >Clear</button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                     {msg.role === "assistant" ? (
                       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>{msg.content}</ReactMarkdown>
                     ) : (
