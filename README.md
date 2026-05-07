@@ -1,8 +1,14 @@
 ![Tiger CoWork Banner](picture/screen_read.png)
 
-# Tiger CoWork v0.7.0
+# Tiger CoWork v0.7.1
 
 A self-hosted AI workspace with chat, code execution, parallel multi-agent orchestration, cross-machine agent connection, and a skill marketplace. Mix different AI providers in the same agent team — OpenAI-compatible APIs, Claude Code CLI, and Codex CLI. Connect agents across machines on your network so distributed teams can collaborate in real time. Connect external MCP servers to extend the AI's toolbox. Built with 16 built-in tools and designed for long-running sessions with smart context compression and checkpoint recovery.
+
+## What's New in v0.7.1
+
+- **Context Compaction Reliability** — fixed a class of `"chat content is empty (2013)"` errors that surfaced as `Context overflow after 3 compression retries` in long pipeline runs. Emergency retries now bypass the 60-second compaction cooldown; `trimConversationContext` is tool-pair aware (assistant `tool_calls` and their matching `tool` results are dropped as a unit so nothing gets orphaned); a new `truncateLargestToolResult` helper targets the single biggest tool message on retries 2–3 instead of halving the whole transcript; and a structural `validateMessageStructure` pass runs after every compression/trim to drop any orphan that slipped through.
+- **Auto-Skill Run Visibility** — when the synthesiser returned `{"proposals":[]}`, the run summary previously showed `created=0 updated=0 skipped=0 candidates=N` with no indication of *why* nothing happened. Empty-proposal outcomes now surface in `skillAutoUpdateLastRunSummary` as `LLM returned no proposals for N session(s)`, and the LLM's actual reply head is logged to the server console for debugging.
+- **Stricter `looksEmpty` Heuristic** — the prose-fallback that coerces a refusal-shaped reply (e.g. *"no skills worth capturing"*) into `proposals=[]` now requires the *whole* trimmed reply to be under 200 characters. Previously a long, malformed proposal that happened to contain "no skill" inside its rationale could be silently swallowed.
 
 ## What's New in v0.7.0
 

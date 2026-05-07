@@ -34,6 +34,10 @@ export function estimateMessagesChars(messages: Array<{ content: any; tool_calls
  * Trim conversation messages to fit within a character budget.
  * Keeps the system prompt + most recent messages, drops older ones.
  * Default ~6M chars ≈ ~1.5M tokens, safe for Grok 2M context with room for response.
+ *
+ * Tool-pair aware: messages are grouped into atomic units where each
+ * `assistant{tool_calls}` is bundled with its matching `tool{tool_call_id}`
+ * results, so trimming never produces orphaned tool messages.
  */
 export function trimConversationContext(
   messages: Array<{ role: string; content: any; [k: string]: any }>,
@@ -54,25 +58,179 @@ export function trimConversationContext(
     startIdx++;
   }
 
-  // Add messages from the end (most recent) until budget is reached
-  const reversed: typeof messages = [];
-  for (let i = messages.length - 1; i >= startIdx; i--) {
-    const msgChars = typeof messages[i].content === "string" ? messages[i].content.length : 500;
-    if (usedChars + msgChars > maxChars) break;
-    reversed.push(messages[i]);
-    usedChars += msgChars;
+  // Pre-group remaining messages into atomic units. An assistant message that
+  // carries tool_calls is bundled with all its matching tool result messages
+  // so the unit is included or dropped as a whole.
+  type Msg = typeof messages[number];
+  const units: Msg[][] = [];
+  let i = startIdx;
+  while (i < messages.length) {
+    const msg = messages[i];
+    if (msg.role === "assistant" && Array.isArray((msg as any).tool_calls) && (msg as any).tool_calls.length > 0) {
+      const ids = new Set<string>(
+        ((msg as any).tool_calls as any[]).map((tc) => tc.id).filter(Boolean)
+      );
+      const unit: Msg[] = [msg];
+      let j = i + 1;
+      // Greedily consume any tool messages that match the pending ids.
+      while (j < messages.length && messages[j].role === "tool" && (messages[j] as any).tool_call_id && ids.has((messages[j] as any).tool_call_id)) {
+        unit.push(messages[j]);
+        j++;
+      }
+      units.push(unit);
+      i = j;
+    } else if (msg.role === "tool") {
+      // Orphan tool message (no matching assistant before it). Treat as its
+      // own unit so validation can drop it later.
+      units.push([msg]);
+      i++;
+    } else {
+      units.push([msg]);
+      i++;
+    }
   }
 
-  if (reversed.length < messages.length - startIdx) {
+  const unitChars = (unit: Msg[]) => {
+    let n = 0;
+    for (const m of unit) {
+      if (typeof m.content === "string") n += m.content.length;
+      else n += 500;
+      if ((m as any).tool_calls) n += JSON.stringify((m as any).tool_calls).length;
+    }
+    return n;
+  };
+
+  // Walk units from most recent backward, taking whole units while budget allows.
+  const taken: Msg[][] = [];
+  let droppedUnits = 0;
+  for (let k = units.length - 1; k >= 0; k--) {
+    const u = units[k];
+    const c = unitChars(u);
+    if (usedChars + c > maxChars) {
+      droppedUnits = k + 1;
+      break;
+    }
+    taken.push(u);
+    usedChars += c;
+  }
+  taken.reverse();
+
+  if (droppedUnits > 0) {
     result.push({
       role: "system",
       content: "[Earlier conversation history was trimmed to fit context window]",
     });
   }
-  result.push(...reversed.reverse());
+  for (const u of taken) result.push(...u);
 
-  console.log(`[ContextTrim] Trimmed ${messages.length} messages (${totalChars} chars) → ${result.length} messages (${usedChars} chars)`);
-  return result;
+  // Final structural validation — drop any orphans that slipped through
+  // (e.g. a tool message taken without its assistant parent because the
+  // parent unit got dropped due to budget).
+  const validated = validateMessageStructure(result).messages;
+
+  console.log(`[ContextTrim] Trimmed ${messages.length} messages (${totalChars} chars) → ${validated.length} messages (${usedChars} chars)`);
+  return validated;
+}
+
+/**
+ * Truncate the largest `tool` message in-place (by index) so an oversized
+ * single tool result doesn't keep blowing the context budget. Used by the
+ * emergency retry loop on retries 2+ when compaction couldn't reduce size.
+ */
+export function truncateLargestToolResult<T extends { role: string; content: any; [k: string]: any }>(
+  messages: T[],
+  maxLen: number = 4000
+): T[] {
+  let largestIdx = -1;
+  let largestLen = 0;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role !== "tool") continue;
+    const len = typeof m.content === "string" ? m.content.length : 0;
+    if (len > largestLen) {
+      largestLen = len;
+      largestIdx = i;
+    }
+  }
+  if (largestIdx < 0 || largestLen <= maxLen) return messages;
+  const m = messages[largestIdx];
+  const original = m.content as string;
+  const truncated = original.slice(0, maxLen) +
+    `\n\n[... truncated due to context overflow — original was ${original.length} chars ...]`;
+  messages[largestIdx] = { ...m, content: truncated };
+  console.log(`[ContextTrim] Truncated largest tool result at idx ${largestIdx}: ${original.length} → ${truncated.length} chars`);
+  return messages;
+}
+
+/**
+ * Validate the structural integrity of a message array against Anthropic's
+ * tool-use rules. Removes orphaned `tool` messages, strips dangling
+ * `tool_calls` ids from assistant messages, and ensures the first
+ * non-system message is a user message.
+ */
+export function validateMessageStructure<T extends { role: string; content: any; tool_calls?: any[]; tool_call_id?: string; [k: string]: any }>(
+  messages: T[]
+): { valid: boolean; messages: T[]; dropped: number } {
+  // First pass: collect all tool_call ids declared by assistants and all
+  // tool_call_ids responded to by tool messages, in order.
+  const cleaned: T[] = [];
+  let dropped = 0;
+  const seenAssistantToolIds = new Set<string>();
+
+  for (const m of messages) {
+    if (m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+      // Look ahead for matching tool results — find the contiguous tool block
+      // immediately following this assistant message.
+      const idx = messages.indexOf(m);
+      const respondedIds = new Set<string>();
+      for (let j = idx + 1; j < messages.length; j++) {
+        const next = messages[j];
+        if (next.role !== "tool") break;
+        if (next.tool_call_id) respondedIds.add(next.tool_call_id);
+      }
+      const keptToolCalls = m.tool_calls.filter((tc: any) => tc.id && respondedIds.has(tc.id));
+      if (keptToolCalls.length === m.tool_calls.length) {
+        for (const tc of keptToolCalls) if (tc.id) seenAssistantToolIds.add(tc.id);
+        cleaned.push(m);
+      } else if (keptToolCalls.length > 0) {
+        for (const tc of keptToolCalls) if (tc.id) seenAssistantToolIds.add(tc.id);
+        const trimmedMsg = { ...m, tool_calls: keptToolCalls };
+        cleaned.push(trimmedMsg as T);
+        dropped += (m.tool_calls.length - keptToolCalls.length);
+      } else {
+        // No tool_calls survive — drop the field entirely; keep the message
+        // only if it has textual content, else drop the whole message.
+        const text = typeof m.content === "string" ? m.content : "";
+        if (text.trim().length > 0) {
+          const stripped = { ...m } as T;
+          delete (stripped as any).tool_calls;
+          cleaned.push(stripped);
+        }
+        dropped += m.tool_calls.length;
+      }
+    } else if (m.role === "tool") {
+      if (m.tool_call_id && seenAssistantToolIds.has(m.tool_call_id)) {
+        cleaned.push(m);
+      } else {
+        dropped++;
+      }
+    } else {
+      cleaned.push(m);
+    }
+  }
+
+  // Ensure the first non-system message is `user`.
+  let firstNonSystem = 0;
+  while (firstNonSystem < cleaned.length && cleaned[firstNonSystem].role === "system") firstNonSystem++;
+  if (firstNonSystem < cleaned.length && cleaned[firstNonSystem].role !== "user") {
+    cleaned.splice(firstNonSystem, 0, { role: "user", content: "Continue." } as T);
+  }
+
+  if (dropped > 0) {
+    console.log(`[ValidateMsg] Dropped ${dropped} malformed messages`);
+  }
+
+  return { valid: dropped === 0, messages: cleaned, dropped };
 }
 
 // ─── Feature 2: Smart Tool Result Compression ───
@@ -488,7 +646,8 @@ function isCompactArtifact(msg: ChatMessage): boolean {
 export async function compressOlderMessages(
   allMessages: ChatMessage[],
   windowSize: number = 10,
-  model?: string
+  model?: string,
+  options?: { force?: boolean }
 ): Promise<ChatMessage[]> {
   // Find boundaries: system messages at start, then the rest
   let systemEnd = 0;
@@ -515,8 +674,10 @@ export async function compressOlderMessages(
   }
 
   // Cooldown: skip if compacted too recently (prevents excessive LLM summarization calls)
+  // Bypassed when called with { force: true } from the emergency retry loop —
+  // we'd rather pay the cost than fail with a context-overflow error.
   const now = Date.now();
-  if (now - _lastCompactionTime < COMPACT_COOLDOWN_MS) {
+  if (!options?.force && now - _lastCompactionTime < COMPACT_COOLDOWN_MS) {
     console.log(`[Compact] Cooldown: last compaction was ${Math.round((now - _lastCompactionTime) / 1000)}s ago (min ${COMPACT_COOLDOWN_MS / 1000}s). Skipping.`);
     return allMessages;
   }
@@ -724,7 +885,10 @@ export async function compressOlderMessages(
     }
   }
 
-  return compressed;
+  // Final structural validation — make sure the compaction step itself didn't
+  // leave any orphaned tool messages or break the user-first invariant.
+  const validated = validateMessageStructure(compressed).messages;
+  return validated as ChatMessage[];
 }
 
 // ─── Feature 3: Checkpoint & Resume ───
@@ -1294,6 +1458,15 @@ export async function callTigerBotWithTools(
       allMessages.length = 0;
       allMessages.push(...trimmed);
     }
+    // Validate after the safety trim — tool-pair-aware trim already validates,
+    // but guard against any future edits to that path.
+    {
+      const v = validateMessageStructure(allMessages).messages as ChatMessage[];
+      if (v.length !== allMessages.length) {
+        allMessages.length = 0;
+        allMessages.push(...v);
+      }
+    }
 
     // Feature 3: Save checkpoint periodically
     if (sessionId && checkpointEnabled && round > 0 && round % checkpointInterval === 0) {
@@ -1326,18 +1499,40 @@ export async function callTigerBotWithTools(
           (errMsg.includes("invalid params") && errMsg.includes("2013"));
         if (isContextOverflow && allMessages.length > 3) {
           console.log(`[ToolLoop] Context overflow detected — compressing before retry (attempt ${llmRetry + 1}/${llmMaxRetries})...`);
-          // First try LLM-based compression
-          const compressed = await compressOlderMessages(allMessages, Math.min(compressionWindowSize, 6), settings.agentCompressionModel);
-          if (compressed.length < allMessages.length) {
+          const beforeLen = allMessages.length;
+          // Always force-compact on emergency retries (bypass cooldown).
+          const compressed = await compressOlderMessages(allMessages, Math.min(compressionWindowSize, 6), settings.agentCompressionModel, { force: true });
+          if (compressed.length < beforeLen) {
             allMessages.length = 0;
-            allMessages.push(...(compressed as ChatMessage[]));
+            allMessages.push(...(validateMessageStructure(compressed as ChatMessage[]).messages as ChatMessage[]));
             console.log(`[ToolLoop] Compressed to ${allMessages.length} messages. Retrying...`);
+          } else if (llmRetry >= 1) {
+            // Retries 2 & 3: target the single largest tool result instead of
+            // halving the whole transcript (which orphaned tool messages).
+            const beforeChars = estimateMessagesChars(allMessages);
+            truncateLargestToolResult(allMessages as any, 4000);
+            const afterChars = estimateMessagesChars(allMessages);
+            if (afterChars < beforeChars) {
+              const v = validateMessageStructure(allMessages).messages as ChatMessage[];
+              if (v.length !== allMessages.length) {
+                allMessages.length = 0;
+                allMessages.push(...v);
+              }
+              console.log(`[ToolLoop] Truncated largest tool result: ${beforeChars} → ${afterChars} chars. Retrying...`);
+            } else {
+              // No tool message large enough — fall back to halving trim.
+              const trimmed = trimConversationContext(allMessages, Math.floor(beforeChars * 0.5)) as ChatMessage[];
+              allMessages.length = 0;
+              allMessages.push(...(validateMessageStructure(trimmed).messages as ChatMessage[]));
+              console.log(`[ToolLoop] Trimmed to ${allMessages.length} messages (${estimateMessagesChars(allMessages)} chars). Retrying...`);
+            }
           } else {
-            // Fallback: aggressive naive trim (halve the char budget)
+            // First retry only: keep the original halving trim path so very
+            // small histories without tool results still get reduced.
             const currentChars = estimateMessagesChars(allMessages);
             const trimmed = trimConversationContext(allMessages, Math.floor(currentChars * 0.5)) as ChatMessage[];
             allMessages.length = 0;
-            allMessages.push(...trimmed);
+            allMessages.push(...(validateMessageStructure(trimmed).messages as ChatMessage[]));
             console.log(`[ToolLoop] Trimmed to ${allMessages.length} messages (${estimateMessagesChars(allMessages)} chars). Retrying...`);
           }
           if (llmRetry >= llmMaxRetries - 1) {
@@ -1412,7 +1607,7 @@ export async function callTigerBotWithTools(
         console.log(`[ToolLoop] Empty content error — trimming context and retrying...`);
         const trimmed = trimConversationContext(allMessages) as ChatMessage[];
         allMessages.length = 0;
-        allMessages.push(...trimmed);
+        allMessages.push(...(validateMessageStructure(trimmed).messages as ChatMessage[]));
         continue; // retry this round
       }
 
@@ -1424,15 +1619,28 @@ export async function callTigerBotWithTools(
         (apiError.includes("2013") && (apiError.includes("invalid params") || apiError.includes("exceeds")));
       if (isCtxOverflow && allMessages.length > 3) {
         console.log(`[ToolLoop] Context/args overflow in API response — compressing and retrying...`);
-        const compressed = await compressOlderMessages(allMessages, Math.min(compressionWindowSize, 6), settings.agentCompressionModel);
-        if (compressed.length < allMessages.length) {
+        const beforeLen = allMessages.length;
+        const compressed = await compressOlderMessages(allMessages, Math.min(compressionWindowSize, 6), settings.agentCompressionModel, { force: true });
+        if (compressed.length < beforeLen) {
           allMessages.length = 0;
-          allMessages.push(...(compressed as ChatMessage[]));
+          allMessages.push(...(validateMessageStructure(compressed as ChatMessage[]).messages as ChatMessage[]));
         } else {
-          const currentChars = estimateMessagesChars(allMessages);
-          const trimmed = trimConversationContext(allMessages, Math.floor(currentChars * 0.5)) as ChatMessage[];
-          allMessages.length = 0;
-          allMessages.push(...trimmed);
+          // Try targeted truncation of the largest tool result first; only
+          // fall back to halving trim if no tool message is big enough.
+          const beforeChars = estimateMessagesChars(allMessages);
+          truncateLargestToolResult(allMessages as any, 4000);
+          const afterChars = estimateMessagesChars(allMessages);
+          if (afterChars < beforeChars) {
+            const v = validateMessageStructure(allMessages).messages as ChatMessage[];
+            if (v.length !== allMessages.length) {
+              allMessages.length = 0;
+              allMessages.push(...v);
+            }
+          } else {
+            const trimmed = trimConversationContext(allMessages, Math.floor(beforeChars * 0.5)) as ChatMessage[];
+            allMessages.length = 0;
+            allMessages.push(...(validateMessageStructure(trimmed).messages as ChatMessage[]));
+          }
         }
         continue; // retry this round
       }

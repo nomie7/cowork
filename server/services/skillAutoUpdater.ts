@@ -805,16 +805,21 @@ export async function runAutoSkillUpdate(opts: { manual?: boolean } = {}): Promi
       parsed = extractJson(replyContent);
     } catch (e: any) {
       // Tolerate the LLM saying "no skills worth capturing" in prose form.
-      // Anything resembling an empty/no-proposal answer becomes proposals=[]
+      // Only coerce to proposals=[] when the WHOLE reply is short — a long
+      // response that happens to contain "no skill" inside a larger rationale
+      // is more likely a malformed proposal than a refusal.
       const stripped = stripReasoning(replyContent);
-      const head = stripped.trim().toLowerCase().slice(0, 200);
+      const trimmed = stripped.trim();
+      const head = trimmed.toLowerCase().slice(0, 200);
       const looksEmpty =
-        stripped.trim().length === 0 ||
-        head.includes("no proposals") ||
-        head.includes("nothing to propose") ||
-        head.includes("no skill") ||
-        head.includes("no worthwhile") ||
-        head.includes("not worth");
+        trimmed.length === 0 ||
+        (trimmed.length < 200 && (
+          head.includes("no proposals") ||
+          head.includes("nothing to propose") ||
+          head.includes("no skill") ||
+          head.includes("no worthwhile") ||
+          head.includes("not worth")
+        ));
       if (looksEmpty) {
         parsed = { proposals: [] };
       } else {
@@ -837,6 +842,15 @@ export async function runAutoSkillUpdate(opts: { manual?: boolean } = {}): Promi
     let updated = remediation.updated;
     let skipped = remediation.skipped;
     const reasons: string[] = [...remediation.reasons];
+
+    // Surface empty-proposals outcome — without this the run summary shows
+    // candidates=N but 0/0/0 outcomes and looks broken.
+    if (proposals.length === 0) {
+      const replyPreview = replyContent.slice(0, 500).replace(/\s+/g, " ");
+      console.log(`[SkillAutoUpdate] LLM returned no proposals for ${candidates.length} session(s). Reply head: ${replyPreview}`);
+      reasons.push(`LLM returned no proposals for ${candidates.length} session(s)`);
+    }
+
     const existingForCollision = (await getSkills()).map((s) => ({ name: s.name, source: s.source }));
 
     for (const raw of proposals) {
